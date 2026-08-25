@@ -10,7 +10,7 @@ import re
 
 from .store import get, parse
 
-MODEL = os.environ.get("PROPOSAL_EDIT_MODEL", "claude-sonnet-4-6")
+MODEL = os.environ.get("PROPOSAL_EDIT_MODEL", "claude-sonnet-5")
 
 SYSTEM = """You rewrite one fragment of an Inceptives Digital proposal.
 
@@ -71,12 +71,21 @@ def edit_node(data, path, instruction, client=None):
         client = anthropic.Anthropic()
     payload = json.dumps({"path": path, "value": node,
                           "instruction": instruction}, ensure_ascii=False)
-    msg = client.messages.create(
-        model=MODEL, max_tokens=1200, system=SYSTEM,
-        messages=[{"role": "user", "content": payload}],
-    )
+    try:
+        msg = client.messages.create(
+            model=MODEL, max_tokens=1200, system=SYSTEM,
+            messages=[{"role": "user", "content": payload}],
+        )
+    except Exception as exc:                                   # noqa: BLE001
+        raise RuntimeError("Model call failed using model %r: %s. Set "
+                           "PROPOSAL_MODEL to a model your API key can use."
+                           % (MODEL, exc))
     text = "".join(b.text for b in msg.content if b.type == "text")
-    new = json.loads(_strip_fences(text))
+    try:
+        new = json.loads(_strip_fences(text))
+    except ValueError:
+        raise RuntimeError("The model did not return valid JSON for %s. Reply "
+                           "began: %s" % (path, text[:200].replace("\n", " ")))
     if not _same_shape(node, new):
         raise ValueError("model changed the shape of %s; edit rejected" % path)
     return [{"op": "set", "path": path, "value": new}]

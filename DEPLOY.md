@@ -40,8 +40,11 @@ Deploy.
 Project → Settings → Environment Variables:
 
     ANTHROPIC_API_KEY     required, server-side only
-    PROPOSAL_MODEL        optional, defaults to claude-sonnet-4-6
+    PROPOSAL_MODEL        optional, defaults to claude-sonnet-5
     PROPOSAL_EDIT_MODEL   optional, same default
+    PROPOSAL_MAX_TOKENS   optional, defaults to 16000
+    PROPOSAL_STAGED       optional, "0" reverts to the old single call
+    PROPOSAL_MAX_TRANSCRIPT  optional, defaults to 60000 characters
 
 Redeploy after adding them.
 
@@ -58,10 +61,16 @@ Vercel gives you a CNAME. Add it at your DNS provider. TLS is automatic.
 **7. Verify**
 
     https://proposals.inceptivesdigital.com/api/health
-    -> {"ok": true, "assets": true}
 
-`assets: false` means the plates did not ship. Check they are committed and that
-`includeFiles` in `vercel.json` still lists `assets/**`.
+    {"ok": true, "assets": true, "anthropic_key_set": true,
+     "generate_model": "claude-sonnet-5", "edit_model": "claude-sonnet-5"}
+
+Read it before debugging anything else:
+
+- `assets: false` — the plates did not ship. Check they are committed and that
+  `includeFiles` in `vercel.json` still lists `assets/**`.
+- `anthropic_key_set: false` — Generate will fail. Add the key and redeploy.
+- wrong model name — set `PROPOSAL_MODEL` to a model your API key can call.
 
 ## Two errors you have already hit, and why
 
@@ -99,3 +108,39 @@ work but live in that object. Making share links real means adding Vercel
 Postgres and putting `renderer/store.py` behind two endpoints.
 
 **No sign-in.** Deployment Protection covers you until it exists.
+
+
+## Reading a failure
+
+Every failure now says what happened. The message appears in the browser alert
+and in the Vercel function log.
+
+- **"ANTHROPIC_API_KEY is not set"** — add it and redeploy.
+- **"Model call failed using model 'x'"** — the model string is wrong for your
+  key, or the key is invalid. `PROPOSAL_MODEL` overrides it.
+- **"The model ran out of room"** — the transcript was long enough that the
+  reply was cut off mid-JSON. Trim it, or raise `PROPOSAL_MAX_TOKENS`.
+- **"The model did not return valid JSON"** — the first 300 characters of the
+  reply are included so you can see what it said instead.
+
+For the raw response: browser DevTools, Network tab, click `generate`, Response.
+Or Vercel dashboard, Deployments, the current one, Functions, Logs.
+
+
+## Content quality
+
+Generation runs as three focused calls, not one:
+
+1. **Brief** — reads the transcript and decides what the product is, who uses it,
+   which interfaces exist and which features belong to each. No sales copy.
+2. **Front pages** — writes pages 1, 3 and 4 against that brief, with a worked
+   example in the prompt so it has a standard to hit.
+3. **Features and technical** — lays out the Core Features pages, page 9 if there
+   is a commercial angle, page 10 and the milestone descriptions.
+
+The single-call version asked for fifteen pages at once and spent a few hundred
+tokens per page, which is why the copy was thin. Three calls cost a few cents
+more and are markedly better.
+
+For the best copy set `PROPOSAL_MODEL=claude-opus-5`. Sonnet is the default
+because it is faster and cheaper; Opus writes better sales copy.

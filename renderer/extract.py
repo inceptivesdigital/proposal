@@ -8,8 +8,12 @@ import os
 import re
 
 from .model import STATIC_DEFAULTS, ICON_NAMES, check_milestones, money
+from .normalize import normalize
 
-MODEL = os.environ.get("PROPOSAL_MODEL", "claude-sonnet-4-6")
+MODEL = os.environ.get("PROPOSAL_MODEL", "claude-sonnet-5")
+MAX_TOKENS = int(os.environ.get("PROPOSAL_MAX_TOKENS", "16000"))
+STAGED = os.environ.get("PROPOSAL_STAGED", "1") != "0"
+MAX_TRANSCRIPT_CHARS = int(os.environ.get("PROPOSAL_MAX_TRANSCRIPT", "60000"))
 
 SYSTEM = """You write proposal content for Inceptives Digital, a UK/US app \
 development agency. You are given a call transcript or written requirements and \
@@ -69,6 +73,7 @@ Return only the JSON object. No commentary, no code fences."""
 
 
 def build_user_prompt(transcript, meta, milestones, total_value):
+    transcript = (transcript or "")[:MAX_TRANSCRIPT_CHARS]
     return json.dumps({
         "transcript": transcript,
         "typed_by_user_use_exactly": {
@@ -90,24 +95,54 @@ def _strip_fences(text):
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n", "", text)
         text = re.sub(r"\n```$", "", text)
-    return text
+    return text.strip()
+
+
+def _parse_json(text):
+    """Models sometimes wrap JSON in a sentence. Take the outermost object."""
+    text = _strip_fences(text)
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(text[start:end + 1])
+    raise ValueError("no JSON object found in the reply")
 
 
 def extract(transcript, meta, milestones, total_value, client=None):
-    """One model call. Returns a proposal dict ready to render."""
+    """Returns a proposal dict ready to render."""
+    if STAGED:
+        return extract_staged(transcript, meta, milestones, total_value, client)
     if client is None:
         import anthropic
         client = anthropic.Anthropic()
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=8000,
-        system=SYSTEM,
-        messages=[{"role": "user",
-                   "content": build_user_prompt(transcript, meta, milestones,
-                                                total_value)}],
-    )
+    try:
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM,
+            messages=[{"role": "user",
+                       "content": build_user_prompt(transcript, meta,
+                                                    milestones, total_value)}],
+        )
+    except Exception as exc:                                   # noqa: BLE001
+        raise RuntimeError("Model call failed using model %r: %s. Set "
+                           "PROPOSAL_MODEL to a model your API key can use."
+                           % (MODEL, exc))
     text = "".join(b.text for b in msg.content if b.type == "text")
-    data = json.loads(_strip_fences(text))
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        raise RuntimeError(
+            "The model ran out of room before finishing the proposal "
+            "(%d tokens). Shorten the transcript, or raise PROPOSAL_MAX_TOKENS."
+            % MAX_TOKENS)
+    try:
+        data = _parse_json(text)
+    except ValueError as exc:
+        raise RuntimeError(
+            "The model did not return valid JSON (%s). First 300 characters of "
+            "its reply: %s" % (exc, text[:300].replace("\n", " ")))
     return assemble(data, meta, milestones, total_value)
 
 
@@ -118,7 +153,9 @@ def assemble(generated, meta, milestones, total_value):
     never reach a client.
     """
     from copy import deepcopy
-    d = deepcopy(generated)
+    # coerce every field before anything downstream sees it, so a model that
+    # returns a string where two lines belong cannot break the editor
+    d = normalize(deepcopy(generated))
     d["meta"] = dict(meta)
     for key in ("page2", "page11", "page13", "page14", "page15"):
         base = deepcopy(STATIC_DEFAULTS[key])
@@ -133,6 +170,155 @@ def assemble(generated, meta, milestones, total_value):
     paid = [r for r in rows if str(r.get("amount", "")).lower() != "included"]
     for row, amount in zip(paid, milestones):
         row["amount"] = amount
+    risk = d.pop("_risk_area", "")
+    if risk:
+        d["page14"]["risk_area"] = risk
     ok, _, _, warning = check_milestones(p12, meta.get("region", "US"))
     d["_warnings"] = [] if ok else [warning]
     return d
+
+
+# ---------------------------------------------------------------------------
+# Staged generation
+# ---------------------------------------------------------------------------
+# Stage 1 reads the transcript and decides what the product actually is.
+# Stages 2 and 3 write copy against that brief, each with a worked example so
+# the model has a quality bar to hit rather than inventing a house style.
+
+BRIEF_SYSTEM = """You are a technical pre-sales lead at Inceptives Digital. Read the transcript and produce a factual brief. You are not writing sales copy yet.
+
+Return JSON:
+{
+ "what_it_is": "one sentence, plain",
+ "who_uses_it": ["each distinct user type named in the source"],
+ "interfaces": [{"name":"Buyer App","platform":"Web & Mobile","for":"buyers",
+                 "features":[{"title":"...","detail":"...","supporting":["..."]}]}],
+ "commercial_angle": "the money argument for the client, or null if there isn't one",
+ "differentiator": "the single sharpest thing this product does that rivals don't",
+ "tech_needs": ["specific technical requirements implied by the features"],
+ "store_risk": "the thing most likely to draw app-store scrutiny, or null"
+}
+
+Rules: every feature must come from the transcript. Do not pad. If the source is thin, return fewer features. Group features by which interface uses them. An interface with fewer than three features is probably part of another interface. Return only JSON."""
+
+COPY_EXAMPLE = """Worked example of the standard, for a property app:
+
+page1.title: ["Real Estate Management", "Application"]
+page3.one_liner: "One platform where buyers search, tour, and make offers and where you watch every listing move in real time."
+page4.one_liner: "Know the price before you see the house."
+page4.cards[0]: {"title":"Value before you view","body":"An instant valuation on every listing removes the biggest reason buyers walk away."}
+
+Note what these do: name the user's actual job, put the benefit before the mechanism, and stay short enough to read in one breath. Match that standard for this client's business, never that client's words."""
+
+COPY_SYSTEM = """You write proposal copy for Inceptives Digital. You are given a brief and you return JSON for the front pages only.
+
+""" + COPY_EXAMPLE + """
+
+Return exactly:
+{"page1":{"title":["line one","line two"],"description":"one sentence"},
+ "page3":{"one_liner":"...","description":["para one","para two"],
+          "surfaces_heading":"Four Connected Surfaces",
+          "surfaces":[{"title":"...","blurb":"one short line","icon":"ic_..."}]},
+ "page4":{"one_liner":"short punch","description":"mechanism then business effect",
+          "cards":[{"title":"...","body":"one sentence","icon":"ic_..."}]}}
+
+page1.title line two must be short, two or three words. page3.description is two paragraphs: what it unites, then the journey and what the business side gains. page4 has exactly three cards. surfaces_heading must spell the count in words and match the number of surfaces. British-neutral, plain, no hype, no em-dashes. Return only JSON."""
+
+FEATURES_SYSTEM = """You lay out the Core Features pages for an Inceptives proposal, from a brief.
+
+One "grid" page per first interface, max 4 cards, each card a two-line title and a mix of lead lines and bulleted supporting points. If that interface has more features than fit, add one "list" page for it, max 4 cards of up to 4 short items.
+Every later interface gets exactly one "device" page: template 7 for a tablet or staff tool, template 8 for a dashboard or owner tool. Max 4 blocks on 7, 6 on 8.
+
+Return:
+{"core_pages":[{"template":5,"kind":"grid","eyebrow":"Core Features \u00b7 <Interface> (<Platform>)",
+  "headline":["line one","line two"],
+  "cards":[{"title":["Two word","Title"],"icon":"ic_...","items":[
+     {"text":"lead line, no bullet"},{"text":"supporting point","bullet":true}]}]}],
+ "page9":{"include":false},
+ "page10":{"stack":[{"title":"Frontend","body":"...","icon":"ic_code"}],
+           "services":[{"title":"...","body":"...","icon":"ic_..."}],
+           "footnote":"..."},
+ "page12_descriptions":["one line per milestone, in order"],
+ "page14_risk_area":"the nature of ..."}
+
+Include page9 only if the brief names a commercial angle; if so give it a headline of three short lines, a description, three cards and a promo message.
+page10.stack is 4 to 6 core technologies, services 4 to 8 integrations, both specific to this product. Return only JSON."""
+
+
+def _call(client, system, payload, max_tokens=8000):
+    try:
+        msg = client.messages.create(
+            model=MODEL, max_tokens=max_tokens, system=system,
+            messages=[{"role": "user", "content": payload}])
+    except Exception as exc:                                   # noqa: BLE001
+        raise RuntimeError("Model call failed using model %r: %s. Set "
+                           "PROPOSAL_MODEL to a model your API key can use."
+                           % (MODEL, exc))
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        raise RuntimeError("The model ran out of room (%d tokens). Shorten the "
+                           "transcript or raise PROPOSAL_MAX_TOKENS." % max_tokens)
+    try:
+        return _parse_json(text)
+    except ValueError as exc:
+        raise RuntimeError("The model did not return valid JSON (%s). Reply "
+                           "began: %s" % (exc, text[:300].replace("\n", " ")))
+
+
+def extract_staged(transcript, meta, milestones, total_value, client=None):
+    """Three focused calls instead of one broad one."""
+    if client is None:
+        import anthropic
+        client = anthropic.Anthropic()
+    transcript = (transcript or "")[:MAX_TRANSCRIPT_CHARS]
+
+    brief = _call(client, BRIEF_SYSTEM, json.dumps(
+        {"transcript": transcript, "project_name": meta.get("project_name"),
+         "client_company": meta.get("client_company")}, ensure_ascii=False), 4000)
+
+    ctx = {"brief": brief, "client_company": meta.get("client_company"),
+           "project_name": meta.get("project_name"),
+           "allowed_icons": ICON_NAMES}
+
+    front = _call(client, COPY_SYSTEM, json.dumps(ctx, ensure_ascii=False), 3000)
+    ctx["front"] = front
+    ctx["milestone_count"] = len(milestones)
+    rest = _call(client, FEATURES_SYSTEM, json.dumps(ctx, ensure_ascii=False), 8000)
+
+    data = {}
+    data.update(front)
+    data["core_pages"] = rest.get("core_pages", [])
+    data["page9"] = rest.get("page9", {"include": False})
+    data["page10"] = rest.get("page10", {})
+    data["page12"] = {"rows": _rows_from(rest.get("page12_descriptions", []),
+                                         milestones)}
+    data["_risk_area"] = rest.get("page14_risk_area", "")
+    data["_brief"] = brief
+    return assemble(data, meta, milestones, total_value)
+
+
+DEFAULT_MILESTONES = [
+    ("Project Initiation & Onboarding", "1\u20132 wks"),
+    ("UI/UX Wireframes & Prototyping", "1\u20132 wks"),
+    ("UI/UX Screen Designs", "1\u20132 wks"),
+    ("Web & Mobile Alpha Frontend", "2\u20133 wks"),
+    ("Backend, Integration & Beta", "2\u20133 wks"),
+    ("Beta Release, Versioning & Testing", "3\u20134 wks"),
+]
+
+
+def _rows_from(descriptions, milestones):
+    rows = []
+    for i in range(len(milestones)):
+        title, dur = (DEFAULT_MILESTONES[i] if i < len(DEFAULT_MILESTONES)
+                      else ("Milestone %d" % (i + 1), "2\u20133 wks"))
+        desc = descriptions[i] if i < len(descriptions) else ""
+        rows.append({"title": title, "duration": dur, "amount": milestones[i],
+                     "desc": desc})
+    rows.append({"title": "Launch & Deployment", "duration": "1\u20132 wks",
+                 "amount": "Included",
+                 "desc": "Code freeze, app store publishing & production deployment"})
+    rows.append({"title": "Post-Launch Support", "duration": "30 days",
+                 "amount": "Included",
+                 "desc": "Technical support, bug fixing & performance monitoring"})
+    return rows

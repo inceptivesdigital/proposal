@@ -47,10 +47,37 @@ def render(data, out_path, screens=None, only=None):
     c = canvas.Canvas(out_path, pagesize=(W, H))
     c.setTitle("%s \u2014 Proposal" % data["meta"].get("project_name", "Proposal"))
     c.setAuthor("Inceptives Digital")
+    failures = []
     for i in wanted:
-        plan[i][1](c)
+        try:
+            plan[i][1](c)
+        except Exception as exc:                            # noqa: BLE001
+            failures.append({"page": i + 1, "name": plan[i][0],
+                             "error": "%s: %s" % (type(exc).__name__, exc)})
+            _error_page(c, plan[i][0], i + 1, exc)
         c.showPage()
     c.save()
     return {"path": out_path, "pages": len(plan),
-            "names": [n for n, _ in plan],
+            "names": [n for n, _ in plan], "failures": failures,
             "milestones_ok": ok, "milestone_warning": msg}
+
+
+def _error_page(c, name, number, exc):
+    """Draw the reason on the page so a preview stays usable."""
+    from .kit import register_fonts, wrap
+    register_fonts()
+    c.setFillColorRGB(0.99, 0.96, 0.94)
+    c.rect(0, 0, W, H, stroke=0, fill=1)
+    c.setFillColorRGB(0.55, 0.22, 0.18)
+    c.setFont("G-Med", 18)
+    c.drawString(48, H - 90, "Page %d (%s) could not be drawn" % (number, name))
+    c.setFont("G-Light", 11)
+    c.setFillColorRGB(0.32, 0.20, 0.18)
+    text = "%s: %s" % (type(exc).__name__, exc)
+    for i, ln in enumerate(wrap(text, "G-Light", 11, W - 96)[:8]):
+        c.drawString(48, H - 122 - i*16, ln)
+    c.setFillColorRGB(0.45, 0.40, 0.38)
+    c.setFont("G-Light", 10)
+    c.drawString(48, H - 300,
+                 "Every other page still rendered. Fix the field named above, "
+                 "or send this message on.")

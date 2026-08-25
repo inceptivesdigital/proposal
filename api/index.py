@@ -90,7 +90,18 @@ def sample():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "assets": os.path.isdir(os.path.join(ROOT, "assets", "plates"))}
+    """Reports the three things that actually break a deployment."""
+    from renderer.extract import MODEL as GEN_MODEL
+    from renderer.edit import MODEL as EDIT_MODEL
+    plates = os.path.join(ROOT, "assets", "plates")
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    return {
+        "ok": True,
+        "assets": os.path.isdir(plates) and len(os.listdir(plates)) >= 15,
+        "anthropic_key_set": bool(key),
+        "generate_model": GEN_MODEL,
+        "edit_model": EDIT_MODEL,
+    }
 
 
 @app.post("/api/render")
@@ -105,6 +116,7 @@ def api_render(body: RenderIn):
         "filename": "%s.pdf" % name.replace(" ", "_"),
         "milestones_ok": meta["milestones_ok"],
         "milestone_warning": meta["milestone_warning"],
+        "failures": meta.get("failures", []),
     }
 
 
@@ -122,11 +134,16 @@ def api_preview(body: PreviewIn):
         raise HTTPException(400, str(exc))
     idx = min(body.page, meta["pages"] - 1)
     return {"page": idx, "pages": meta["pages"], "name": meta["names"][idx],
+            "failures": meta.get("failures", []),
             "png": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}
 
 
 @app.post("/api/generate")
 def api_generate(body: GenerateIn):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            500, "ANTHROPIC_API_KEY is not set on the server. Add it in Vercel "
+                 "under Settings > Environment Variables, then redeploy.")
     try:
         data = extract(body.transcript, body.meta, body.milestones,
                        body.total_value)

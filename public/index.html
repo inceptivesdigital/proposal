@@ -159,8 +159,10 @@ const $ = s => document.querySelector(s);
 const api = async (path, body) => {
   const r = await fetch(path, {method:'POST', headers:{'content-type':'application/json'},
                               body: JSON.stringify(body)});
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || 'request failed');
+  let j;
+  try { j = await r.json(); }
+  catch (e) { throw new Error('Server returned ' + r.status + ' with no JSON body.'); }
+  if (!r.ok) throw new Error(j.error || j.detail || ('Server returned ' + r.status));
   return j;
 };
 const busy = t => $('#busy').textContent = t || '';
@@ -193,6 +195,7 @@ function restore(){
   try{ const raw = localStorage.getItem('proposal'); if(raw) doc = JSON.parse(raw); }catch(e){}
 }
 
+const arr = v => Array.isArray(v) ? v : (v == null ? [] : [v]);
 const getAt = (o,p) => p.split('.').reduce((n,k)=>n[/^\d+$/.test(k)?+k:k], o);
 const setAt = (o,p,v) => { const k=p.split('.'); const last=k.pop();
   const n=k.reduce((x,y)=>x[/^\d+$/.test(y)?+y:y], o); n[/^\d+$/.test(last)?+last:last]=v; };
@@ -263,19 +266,20 @@ function section(title, build, open){
 function renderEditor(){
   const host = $('#editor'); host.innerHTML = '';
   const D = data();
+  try {
 
   host.append(section('Client & project', el => {
     Object.entries(D.meta).forEach(([k,v]) => el.append(fieldFor('meta.'+k, v, k.replace(/_/g,' '))));
   }, true));
 
   host.append(section('Page 1 — Cover', el => {
-    D.page1.title.forEach((t,i)=>el.append(fieldFor(`page1.title.${i}`, t, 'title line '+(i+1))));
+    arr(D.page1.title).forEach((t,i)=>el.append(fieldFor(`page1.title.${i}`, t, 'title line '+(i+1))));
     el.append(fieldFor('page1.description', D.page1.description, 'description'));
   }));
 
   host.append(section('Page 3 — Overview & surfaces', el => {
     el.append(fieldFor('page3.one_liner', D.page3.one_liner, 'one-liner'));
-    D.page3.description.forEach((p,i)=>el.append(fieldFor(`page3.description.${i}`, p, 'paragraph '+(i+1))));
+    arr(D.page3.description).forEach((p,i)=>el.append(fieldFor(`page3.description.${i}`, p, 'paragraph '+(i+1))));
     el.append(fieldFor('page3.surfaces_heading', D.page3.surfaces_heading, 'surfaces heading'));
     el.append(listBlock('page3.surfaces', D.page3.surfaces, s=>s.title,
               {title:'New surface', blurb:'', icon:'ic_home'}));
@@ -291,7 +295,7 @@ function renderEditor(){
   (D.core_pages||[]).forEach((cp, i) => {
     host.append(section(`Core features — page ${cp.template} (${cp.kind})`, el => {
       el.append(fieldFor(`core_pages.${i}.eyebrow`, cp.eyebrow, 'eyebrow'));
-      cp.headline.forEach((h,j)=>el.append(fieldFor(`core_pages.${i}.headline.${j}`, h, 'headline '+(j+1))));
+      arr(cp.headline).forEach((h,j)=>el.append(fieldFor(`core_pages.${i}.headline.${j}`, h, 'headline '+(j+1))));
       if (cp.intro) el.append(fieldFor(`core_pages.${i}.intro`, cp.intro, 'intro'));
       if (cp.cards) el.append(listBlock(`core_pages.${i}.cards`, cp.cards,
           c => Array.isArray(c.title) ? c.title.join(' ') : c.title,
@@ -303,7 +307,7 @@ function renderEditor(){
   });
 
   if (D.page9 && D.page9.include) host.append(section('Page 9 — Marketing engine', el => {
-    D.page9.headline.forEach((h,i)=>el.append(fieldFor(`page9.headline.${i}`, h, 'headline '+(i+1))));
+    arr(D.page9.headline).forEach((h,i)=>el.append(fieldFor(`page9.headline.${i}`, h, 'headline '+(i+1))));
     el.append(fieldFor('page9.description', D.page9.description, 'description'));
     el.append(listBlock('page9.cards', D.page9.cards, c=>c.title,
               {title:'New card', body:'', icon:'ic_db'}));
@@ -337,13 +341,20 @@ function renderEditor(){
     el.append(fieldFor('page14.risk_area', D.page14.risk_area, 'app-store risk area'));
   }));
 
+  } catch (err) {
+    const p = document.createElement('div');
+    p.className = 'warn err';
+    p.textContent = 'Part of this proposal has an unexpected shape: ' + err.message
+      + '. The pages above still render; use Save JSON if you need to inspect it.';
+    host.append(p);
+  }
   host.append(section('Boilerplate — pages 2, 11, 13, 15', el => {
     el.append(fieldFor('page13.need.4', D.page13.need[4], 'client-supplied dependency'));
     const p = document.createElement('p'); p.className='hint';
     p.textContent = 'The rest is house boilerplate and identical on every proposal. '
                   + 'Edit it here only if this client genuinely needs something different.';
     el.append(p);
-    D.page11.steps.forEach((s,i)=>{
+    arr(D.page11.steps).forEach((s,i)=>{
       el.append(fieldFor(`page11.steps.${i}.title`, s.title, `step ${i+1} title`));
       el.append(fieldFor(`page11.steps.${i}.body`, s.body, `step ${i+1} body`));
     });
@@ -362,7 +373,7 @@ async function refreshPreview(){
     const r = await api('/api/preview', {data: data(), page, scale: 1.5});
     $('#preview').src = r.png;
     buildPager(r.pages);
-    busy('');
+    busy((r.failures && r.failures.length) ? 'page error \u2014 see preview' : '');
   } catch (e) { busy(''); alert(e.message); }
 }
 function buildPager(n){
@@ -417,7 +428,11 @@ $('#btnGenerate').onclick = async () => {
     });
     dlgNew.close(); newDoc(r.data);
     if ((r.warnings||[]).length) alert(r.warnings.join('\n'));
-  } catch (e) { alert(e.message); }
+  } catch (e) {
+    alert('Generate failed.\n\n' + e.message +
+          '\n\nCheck /api/health in a new tab: it reports whether the API key ' +
+          'is set and which model is configured.');
+  }
   busy('');
 };
 

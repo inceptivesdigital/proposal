@@ -36,13 +36,24 @@ def plate(canvas, page):
                      width=W, height=H)
 
 
+def as_text(value):
+    """Layout code should never crash on an unexpected type."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return " ".join(as_text(v) for v in value if v is not None)
+    return str(value)
+
+
 def sw(text, font, size):
-    return pdfmetrics.stringWidth(text, font, size)
+    return pdfmetrics.stringWidth(as_text(text), font, size)
 
 
 def wrap(text, font, size, maxw):
     out, cur = [], ""
-    for word in (text or "").split():
+    for word in as_text(text).split():
         t = (cur + " " + word).strip()
         if sw(t, font, size) <= maxw:
             cur = t

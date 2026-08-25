@@ -1,0 +1,15 @@
+[project]
+name = "proposal-creator"
+version = "1.0.0"
+description = "Inceptives Digital proposal generator"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "reportlab>=4.0",
+  "pillow>=10.0",
+  "pypdfium2>=4.30",
+  "anthropic>=0.40",
+]
+
+[tool.vercel]
+entrypoint = "api.index:app"

@@ -20,7 +20,8 @@ if ROOT not in sys.path:
 
 from renderer import render                    # noqa: E402
 from renderer.edit import edit_node            # noqa: E402
-from renderer.extract import extract           # noqa: E402
+from renderer.extract import (                 # noqa: E402
+    extract, make_brief, make_front, make_features, combine)
 
 PUBLIC = os.path.join(ROOT, "public")
 app = FastAPI(title="Inceptives Proposal Creator", docs_url=None, redoc_url=None)
@@ -63,6 +64,24 @@ class PreviewIn(BaseModel):
 
 class GenerateIn(BaseModel):
     transcript: str
+    meta: dict
+    milestones: list = []
+    total_value: float = 0
+
+
+class BriefIn(BaseModel):
+    transcript: str
+    meta: dict
+
+
+class FrontIn(BaseModel):
+    brief: dict
+    meta: dict
+
+
+class FeaturesIn(BaseModel):
+    brief: dict
+    front: dict
     meta: dict
     milestones: list = []
     total_value: float = 0
@@ -146,6 +165,46 @@ def api_generate(body: GenerateIn):
                  "under Settings > Environment Variables, then redeploy.")
     try:
         data = extract(body.transcript, body.meta, body.milestones,
+                       body.total_value)
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+    return {"data": data, "warnings": data.pop("_warnings", [])}
+
+
+def _need_key():
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            500, "ANTHROPIC_API_KEY is not set on the server. Add it in Vercel "
+                 "under Settings > Environment Variables, then redeploy.")
+
+
+# Generation runs as three requests rather than one, because three model calls
+# in a single request exceed the platform's 60 second limit and return a 504.
+@app.post("/api/brief")
+def api_brief(body: BriefIn):
+    _need_key()
+    try:
+        return {"brief": make_brief(body.transcript, body.meta)}
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/front")
+def api_front(body: FrontIn):
+    _need_key()
+    try:
+        return {"front": make_front(body.brief, body.meta)}
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/features")
+def api_features(body: FeaturesIn):
+    _need_key()
+    try:
+        rest = make_features(body.brief, body.front, body.meta,
+                             len(body.milestones))
+        data = combine(body.front, rest, body.meta, body.milestones,
                        body.total_value)
     except Exception as exc:                                  # noqa: BLE001
         raise HTTPException(400, str(exc))

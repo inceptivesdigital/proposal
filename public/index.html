@@ -415,24 +415,34 @@ $('#nMilestones').oninput = $('#nTotal').oninput = () => {
        Adjust the middle milestones, never the first or last.</div>`;
 };
 $('#btnGenerate').onclick = async () => {
-  busy('generating…');
+  const meta = {client_contact:$('#nContact').value, client_company:$('#nCompany').value,
+                project_name:$('#nProject').value, region:$('#nRegion').value,
+                signer_name:$('#nSigner').value, signer_role:$('#nRole').value,
+                date: new Date().toLocaleDateString('en-GB',
+                      {day:'numeric',month:'long',year:'numeric'})};
+  const milestones = ($('#nMilestones').value||'').split(',')
+                      .map(s=>+s.trim()).filter(n=>!isNaN(n));
+  const total_value = +$('#nTotal').value;
+  const transcript = $('#nTranscript').value;
+  const btn = $('#btnGenerate');
+  btn.disabled = true;
   try {
-    const r = await api('/api/generate', {
-      transcript: $('#nTranscript').value,
-      meta: {client_contact:$('#nContact').value, client_company:$('#nCompany').value,
-             project_name:$('#nProject').value, region:$('#nRegion').value,
-             signer_name:$('#nSigner').value, signer_role:$('#nRole').value,
-             date: new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})},
-      milestones: ($('#nMilestones').value||'').split(',').map(s=>+s.trim()).filter(n=>!isNaN(n)),
-      total_value: +$('#nTotal').value,
-    });
-    dlgNew.close(); newDoc(r.data);
+    // three requests, because three model calls in one request time out
+    busy('reading the transcript…');
+    const {brief} = await api('/api/brief', {transcript, meta});
+    busy('writing the front pages…');
+    const {front} = await api('/api/front', {brief, meta});
+    busy('laying out the features…');
+    const r = await api('/api/features', {brief, front, meta, milestones, total_value});
+    dlgNew.close();
+    newDoc(r.data);
     if ((r.warnings||[]).length) alert(r.warnings.join('\n'));
   } catch (e) {
     alert('Generate failed.\n\n' + e.message +
           '\n\nCheck /api/health in a new tab: it reports whether the API key ' +
           'is set and which model is configured.');
   }
+  btn.disabled = false;
   busy('');
 };
 

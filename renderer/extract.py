@@ -265,36 +265,60 @@ def _call(client, system, payload, max_tokens=8000):
                            "began: %s" % (exc, text[:300].replace("\n", " ")))
 
 
-def extract_staged(transcript, meta, milestones, total_value, client=None):
-    """Three focused calls instead of one broad one."""
+def _client(client=None):
     if client is None:
         import anthropic
         client = anthropic.Anthropic()
-    transcript = (transcript or "")[:MAX_TRANSCRIPT_CHARS]
+    return client
 
-    brief = _call(client, BRIEF_SYSTEM, json.dumps(
-        {"transcript": transcript, "project_name": meta.get("project_name"),
+
+def make_brief(transcript, meta, client=None):
+    """Stage 1. Comprehension only, no sales copy."""
+    return _call(_client(client), BRIEF_SYSTEM, json.dumps(
+        {"transcript": (transcript or "")[:MAX_TRANSCRIPT_CHARS],
+         "project_name": meta.get("project_name"),
          "client_company": meta.get("client_company")}, ensure_ascii=False), 4000)
 
+
+def make_front(brief, meta, client=None):
+    """Stage 2. Pages 1, 3 and 4."""
     ctx = {"brief": brief, "client_company": meta.get("client_company"),
+           "project_name": meta.get("project_name"), "allowed_icons": ICON_NAMES}
+    return _call(_client(client), COPY_SYSTEM,
+                 json.dumps(ctx, ensure_ascii=False), 3000)
+
+
+def make_features(brief, front, meta, milestone_count, client=None):
+    """Stage 3. Core Features pages, page 9, page 10, milestone descriptions."""
+    ctx = {"brief": brief, "front": front, "allowed_icons": ICON_NAMES,
+           "client_company": meta.get("client_company"),
            "project_name": meta.get("project_name"),
-           "allowed_icons": ICON_NAMES}
+           "milestone_count": milestone_count}
+    return _call(_client(client), FEATURES_SYSTEM,
+                 json.dumps(ctx, ensure_ascii=False), 8000)
 
-    front = _call(client, COPY_SYSTEM, json.dumps(ctx, ensure_ascii=False), 3000)
-    ctx["front"] = front
-    ctx["milestone_count"] = len(milestones)
-    rest = _call(client, FEATURES_SYSTEM, json.dumps(ctx, ensure_ascii=False), 8000)
 
+def combine(front, rest, meta, milestones, total_value):
+    """Merge the stage outputs into a finished document."""
     data = {}
-    data.update(front)
+    data.update(front or {})
+    rest = rest or {}
     data["core_pages"] = rest.get("core_pages", [])
     data["page9"] = rest.get("page9", {"include": False})
     data["page10"] = rest.get("page10", {})
     data["page12"] = {"rows": _rows_from(rest.get("page12_descriptions", []),
                                          milestones)}
     data["_risk_area"] = rest.get("page14_risk_area", "")
-    data["_brief"] = brief
     return assemble(data, meta, milestones, total_value)
+
+
+def extract_staged(transcript, meta, milestones, total_value, client=None):
+    """Three focused calls instead of one broad one."""
+    client = _client(client)
+    brief = make_brief(transcript, meta, client)
+    front = make_front(brief, meta, client)
+    rest = make_features(brief, front, meta, len(milestones), client)
+    return combine(front, rest, meta, milestones, total_value)
 
 
 DEFAULT_MILESTONES = [

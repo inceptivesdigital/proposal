@@ -95,7 +95,11 @@ in `pyproject.toml`.
 
     GET  /                    the editor
     GET  /api/health          asset sanity check
-    POST /api/generate        {transcript, meta, milestones, total_value}
+    POST /api/brief           {transcript, meta}          -> {brief}
+    POST /api/front           {brief, meta}                -> {front}
+    POST /api/features        {brief, front, meta, milestones, total_value}
+                                                           -> {data, warnings}
+    POST /api/generate        all three in one request; local use only
     POST /api/preview         {data, page, scale} -> one page as PNG
     POST /api/render          {data} -> full PDF, base64
     POST /api/edit            {data, path, instruction} -> ops, 423 if locked
@@ -120,6 +124,10 @@ and in the Vercel function log.
   key, or the key is invalid. `PROPOSAL_MODEL` overrides it.
 - **"The model ran out of room"** — the transcript was long enough that the
   reply was cut off mid-JSON. Trim it, or raise `PROPOSAL_MAX_TOKENS`.
+- **504 with no JSON body** — the request outran the platform limit. The editor
+  now calls `/api/brief`, `/api/front` and `/api/features` in sequence so each
+  gets its own 60 seconds. `/api/generate` still does all three in one request
+  and will time out on Vercel; it is there for local use and the CLI.
 - **"The model did not return valid JSON"** — the first 300 characters of the
   reply are included so you can see what it said instead.
 

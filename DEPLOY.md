@@ -41,6 +41,7 @@ Project → Settings → Environment Variables:
 
     ANTHROPIC_API_KEY     required, server-side only
     PROPOSAL_MODEL        optional, defaults to claude-sonnet-5
+    PROPOSAL_BRIEF_MODEL  optional, stage 1 only, defaults to claude-sonnet-5
     PROPOSAL_EDIT_MODEL   optional, same default
     PROPOSAL_MAX_TOKENS   optional, defaults to 16000
     PROPOSAL_STAGED       optional, "0" reverts to the old single call
@@ -152,3 +153,28 @@ more and are markedly better.
 
 For the best copy set `PROPOSAL_MODEL=claude-opus-5`. Sonnet is the default
 because it is faster and cheaper; Opus writes better sales copy.
+
+
+## If Generate still fails after a redeploy
+
+Open `/api/health` first. It now reports the live build:
+
+    {"build": "2026-08-26.3-staged", "staged_endpoints": true, ...}
+
+- **`staged_endpoints` missing or false** — the deployment is older than the
+  three-request split. Redeploy.
+- **`build` is right but the browser still fails the same way** — you are
+  running a cached copy of the editor. Hard refresh: Cmd-Shift-R on Mac,
+  Ctrl-Shift-R on Windows. The editor now shows the server build in its header,
+  so a mismatch is visible without opening DevTools.
+
+Stage 1 runs on `PROPOSAL_BRIEF_MODEL` (Sonnet by default) even when
+`PROPOSAL_MODEL` is set to Opus, because comprehension does not need the slower
+model and stage 1 should never be the thing that times out.
+
+### Capturing a HAR that actually contains something
+
+1. Open DevTools **before** clicking Generate
+2. Network tab, tick **Preserve log**
+3. Click Generate, wait for the failure
+4. Right-click any row, Save all as HAR with content

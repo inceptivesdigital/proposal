@@ -94,9 +94,14 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
+BUILD = "2026-08-26.3-staged"
+
+
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(PUBLIC, "index.html"))
+    # never cache the editor: a stale copy keeps calling old endpoints
+    return FileResponse(os.path.join(PUBLIC, "index.html"),
+                        headers={"cache-control": "no-store, must-revalidate"})
 
 
 @app.get("/sample.json")
@@ -114,10 +119,14 @@ def health():
     from renderer.edit import MODEL as EDIT_MODEL
     plates = os.path.join(ROOT, "assets", "plates")
     key = os.environ.get("ANTHROPIC_API_KEY", "")
+    from renderer.extract import BRIEF_MODEL
     return {
         "ok": True,
+        "build": BUILD,
+        "staged_endpoints": True,
         "assets": os.path.isdir(plates) and len(os.listdir(plates)) >= 15,
         "anthropic_key_set": bool(key),
+        "brief_model": BRIEF_MODEL,
         "generate_model": GEN_MODEL,
         "edit_model": EDIT_MODEL,
     }

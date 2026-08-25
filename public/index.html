@@ -86,6 +86,7 @@
     <span id="docStatus" class="pill">draft</span>
     <span id="docVersion">v1</span>
     <span id="busy"></span>
+    <span id="build" class="pill" title="server build">…</span>
   </div>
 </header>
 
@@ -524,6 +525,15 @@ $('#btnOpen').onclick = () => {
   };
   inp.click();
 };
+
+fetch('/api/health').then(r=>r.json()).then(j=>{
+  $('#build').textContent = j.build || 'unknown';
+  if (!j.staged_endpoints)
+    alert('This page is talking to an older server build. Redeploy, then hard-'
+        + 'refresh with Cmd-Shift-R.');
+  if (!j.anthropic_key_set)
+    alert('ANTHROPIC_API_KEY is not set on the server. Generate will fail.');
+}).catch(()=>{});
 
 restore();
 if (doc) renderAll();

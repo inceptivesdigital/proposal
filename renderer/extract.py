@@ -11,6 +11,10 @@ from .model import STATIC_DEFAULTS, ICON_NAMES, check_milestones, money
 from .normalize import normalize
 
 MODEL = os.environ.get("PROPOSAL_MODEL", "claude-sonnet-5")
+# stage 1 is comprehension, not copywriting, so it stays on a fast model even
+# when PROPOSAL_MODEL is set to something slower
+BRIEF_MODEL = os.environ.get("PROPOSAL_BRIEF_MODEL", "claude-sonnet-5")
+BRIEF_TRANSCRIPT_CHARS = int(os.environ.get("PROPOSAL_BRIEF_CHARS", "24000"))
 MAX_TOKENS = int(os.environ.get("PROPOSAL_MAX_TOKENS", "16000"))
 STAGED = os.environ.get("PROPOSAL_STAGED", "1") != "0"
 MAX_TRANSCRIPT_CHARS = int(os.environ.get("PROPOSAL_MAX_TRANSCRIPT", "60000"))
@@ -130,7 +134,7 @@ def extract(transcript, meta, milestones, total_value, client=None):
     except Exception as exc:                                   # noqa: BLE001
         raise RuntimeError("Model call failed using model %r: %s. Set "
                            "PROPOSAL_MODEL to a model your API key can use."
-                           % (MODEL, exc))
+                           % (model, exc))
     text = "".join(b.text for b in msg.content if b.type == "text")
     if getattr(msg, "stop_reason", None) == "max_tokens":
         raise RuntimeError(
@@ -245,15 +249,16 @@ Include page9 only if the brief names a commercial angle; if so give it a headli
 page10.stack is 4 to 6 core technologies, services 4 to 8 integrations, both specific to this product. Return only JSON."""
 
 
-def _call(client, system, payload, max_tokens=8000):
+def _call(client, system, payload, max_tokens=8000, model=None):
+    model = model or MODEL
     try:
         msg = client.messages.create(
-            model=MODEL, max_tokens=max_tokens, system=system,
+            model=model, max_tokens=max_tokens, system=system,
             messages=[{"role": "user", "content": payload}])
     except Exception as exc:                                   # noqa: BLE001
         raise RuntimeError("Model call failed using model %r: %s. Set "
                            "PROPOSAL_MODEL to a model your API key can use."
-                           % (MODEL, exc))
+                           % (model, exc))
     text = "".join(b.text for b in msg.content if b.type == "text")
     if getattr(msg, "stop_reason", None) == "max_tokens":
         raise RuntimeError("The model ran out of room (%d tokens). Shorten the "
@@ -275,9 +280,10 @@ def _client(client=None):
 def make_brief(transcript, meta, client=None):
     """Stage 1. Comprehension only, no sales copy."""
     return _call(_client(client), BRIEF_SYSTEM, json.dumps(
-        {"transcript": (transcript or "")[:MAX_TRANSCRIPT_CHARS],
+        {"transcript": (transcript or "")[:BRIEF_TRANSCRIPT_CHARS],
          "project_name": meta.get("project_name"),
-         "client_company": meta.get("client_company")}, ensure_ascii=False), 4000)
+         "client_company": meta.get("client_company")},
+        ensure_ascii=False), 2500, model=BRIEF_MODEL)
 
 
 def make_front(brief, meta, client=None):

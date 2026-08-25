@@ -1,4 +1,0 @@
-reportlab>=4.0
-pillow>=10.0
-pypdfium2>=4.30
-anthropic>=0.40

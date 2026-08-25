@@ -62,16 +62,31 @@ def _paras(v, n=2):
     return items[:n] if n else items
 
 
+TITLE_KEYS = ("title", "heading", "name", "label", "header")
+BODY_KEYS = ("body", "blurb", "lead", "desc", "description", "text", "detail",
+             "copy", "summary")
+
+
+def _first(d, keys):
+    for k in keys:
+        if d.get(k):
+            return d[k]
+    return ""
+
+
 def _card(item, title_lines=None):
-    """title/body/icon, with the title split across lines when asked."""
+    """title/body/icon. Models rename these keys constantly, so accept aliases."""
     d = item if isinstance(item, dict) else {"title": _s(item)}
+    title = _first(d, TITLE_KEYS)
+    body = _first(d, BODY_KEYS)
     out = {
-        "title": _lines(d.get("title"), title_lines) if title_lines
-                 else _s(d.get("title")),
+        "title": _lines(title, title_lines) if title_lines else _s(title),
         "icon": _s(d.get("icon")) or DEFAULT_ICON,
     }
-    for key in ("body", "blurb", "lead", "desc"):
-        if key in d:
+    if body or any(k in d for k in BODY_KEYS):
+        out["body"] = _s(body)
+    for key in ("blurb", "lead", "desc"):
+        if key in d and key not in out:
             out[key] = _s(d[key])
     return out
 
@@ -96,7 +111,8 @@ def normalize(d):
     }
 
     p4 = dict(d.get("page4") or {})
-    cards = [_card(c) for c in _list_of(p4.get("cards"))][:3]
+    cards = [_card(c) for c in _list_of(p4.get("cards"))]
+    cards = [c for c in cards if c.get("title") or c.get("body")][:3]
     for c in cards:
         c.setdefault("body", "")
     d["page4"] = {"eyebrow": _s(p4.get("eyebrow")) or "The Differentiator",

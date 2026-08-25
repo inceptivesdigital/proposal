@@ -53,6 +53,13 @@
         background:#fcfdff}
   .item .row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
   .item .row strong{font-size:12px;color:var(--muted);margin-right:auto}
+  .hot{position:absolute;cursor:text;border-radius:3px;
+       outline:1px dashed rgba(37,99,235,0);transition:outline-color .12s,background .12s}
+  .hot:hover{outline-color:rgba(37,99,235,.55);background:rgba(37,99,235,.06)}
+  .hot.editing{outline:1px solid var(--blue);background:#fff}
+  .hot textarea{position:absolute;inset:0;width:100%;height:100%;border:none;
+       background:#fff;font-family:inherit;color:var(--ink);padding:2px 3px;
+       resize:none;line-height:1.25;outline:none;border-radius:3px}
   .warn{background:#fff5e6;border:1px solid #f0d9ac;color:#7a5a12;border-radius:9px;
         padding:9px 11px;margin:10px 0;font-size:13px}
   .err{background:#fdeceb;border-color:#f0c0bc;color:#8d3831}
@@ -77,8 +84,8 @@
 <header>
   <h1>Proposal Creator</h1>
   <button id="btnNew">New from transcript</button>
-  <button id="btnOpen">Open JSON</button>
-  <button id="btnSaveJson">Save JSON</button>
+  <button id="btnOpen" title="Reopen a proposal you saved as a file">Open</button>
+  <button id="btnSaveJson" title="Download this proposal as a file you can reopen later">Save</button>
   <button id="btnScreens">UI screens</button>
   <button id="btnVersions">Versions</button>
   <button id="btnSend">Send</button>
@@ -97,7 +104,7 @@
     <div class="toolbar">
       <button id="btnPrompt">Edit selection by prompt</button>
       <button id="btnNote">Add note</button>
-      <span class="hint" id="selPath">nothing selected</span>
+      <span class="hint" id="selPath">click any text on the preview to edit it</span>
     </div>
     <div class="body" id="editor"></div>
   </section>
@@ -106,7 +113,12 @@
     <h2>Preview</h2>
     <div class="pager" id="pager"></div>
     <div id="qa" style="padding:0 14px"></div>
-    <div class="body" style="padding:0"><img id="preview" alt="page preview"></div>
+    <div class="body" style="padding:0">
+      <div id="stage" style="position:relative;line-height:0">
+        <img id="preview" alt="page preview" style="width:100%">
+        <div id="overlay" style="position:absolute;inset:0"></div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -154,9 +166,35 @@
 <dialog id="dlgScreens">
   <h3>UI screens</h3>
   <div class="body">
-    <p class="hint">Export the screens from UX Pilot as PNG, then attach one to
-      each slot. Slots without a screen print a dashed placeholder, so you can
-      review the whole proposal before the screens exist.</p>
+    <p class="hint">Export everything from UX Pilot as a <strong>single PDF</strong>
+      and drop it in below. Each page becomes one screen, cropped automatically,
+      and you assign them to slots. Slots left empty print a dashed placeholder,
+      so a proposal can be reviewed before the screens exist.</p>
+    <div class="toolbar" style="padding:0 0 10px;border:none;background:none">
+      <button class="primary" id="btnAutoScreens">Generate all screens</button>
+      <select id="screenEngine" style="padding:6px 9px;border-radius:8px;border:1px solid var(--line);font:inherit">
+        <option value="auto">Best available</option>
+        <option value="v0">v0 (photographic, needs keys)</option>
+        <option value="builtin">Built in (instant)</option>
+      </select>
+      <button id="btnTestKeys">Test keys</button>
+      <span class="hint" id="engineHint">No export, no upload.</span>
+    </div>
+    <details style="margin-bottom:10px">
+      <summary>Use UX Pilot instead</summary>
+      <div class="toolbar" style="padding:8px 0 0;border:none;background:none">
+        <button id="btnUxMobile">Copy mobile prompt</button>
+        <button id="btnUxDesktop">Copy wide-screen prompt</button>
+      </div>
+      <p class="hint">Paste into UX Pilot, generate, export everything as one
+        PDF, then drop it in below.</p>
+    </details>
+    <div class="field">
+      <label>UX Pilot PDF export</label>
+      <input type="file" id="pdfPick" accept="application/pdf">
+    </div>
+    <div id="pdfPages"></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
     <div id="screenList"></div>
   </div>
   <footer><button onclick="dlgScreens.close()">Close</button></footer>
@@ -388,6 +426,7 @@ async function refreshPreview(){
                                         screens_data: doc.screens || {}});
     $('#preview').src = r.png;
     buildPager(r.pages);
+    buildOverlay(r.textmap || []);
     const issues = (r.failures||[]).length + (r.qa||[]).length;
     busy(issues ? issues + ' layout issue' + (issues>1?'s':'') : '');
     $('#qa').innerHTML = '';
@@ -400,6 +439,55 @@ async function refreshPreview(){
       });
   } catch (e) { busy(''); alert(e.message); }
 }
+// ------------------------------------------- click-on-the-page text editing
+const PT = 595.2, PTH = 841.92;   // page size in points
+
+function buildOverlay(map){
+  const host = $('#overlay'); host.innerHTML = '';
+  const img = $('#preview');
+  if (!img.clientWidth) { img.onload = () => buildOverlay(map); return; }
+  const sx = img.clientWidth / PT, sy = img.clientHeight / PTH;
+  map.forEach(t => {
+    const box = document.createElement('div');
+    box.className = 'hot';
+    // y is the baseline of the first line; the box grows downward from there
+    const top = (PTH - t.y - t.size * 0.82) * sy;
+    box.style.left   = (t.x * sx) + 'px';
+    box.style.top    = top + 'px';
+    box.style.width  = (t.w * sx) + 'px';
+    box.style.height = Math.max(t.h * sy, 12) + 'px';
+    box.title = t.path;
+    box.onclick = () => openInline(box, t, sx);
+    host.append(box);
+  });
+}
+
+function openInline(box, t, sx){
+  if (box.classList.contains('editing')) return;
+  box.classList.add('editing');
+  const ta = document.createElement('textarea');
+  ta.value = getAt(data(), t.path) ?? '';
+  ta.style.fontSize = Math.max(t.size * sx, 8) + 'px';
+  ta.style.textAlign = t.align === 'center' ? 'center' : 'left';
+  ta.style.fontWeight = /Med|Semi|Reg/.test(t.font) ? '600' : '400';
+  box.append(ta);
+  ta.focus(); ta.select();
+  sel = t.path; $('#selPath').textContent = t.path;
+  const close = (save) => {
+    box.classList.remove('editing');
+    ta.remove();
+    if (save && ta.value !== (getAt(data(), t.path) ?? ''))
+      commit(d => setAt(d, t.path, ta.value), 'edit ' + t.path);
+  };
+  ta.onblur = () => close(true);
+  ta.onkeydown = e => {
+    if (e.key === 'Escape') { e.preventDefault(); close(false); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
+  };
+}
+
+window.addEventListener('resize', () => schedulePreview());
+
 function buildPager(n){
   const p = $('#pager'); p.innerHTML = '';
   const prev = document.createElement('button'); prev.textContent = '‹';
@@ -527,6 +615,152 @@ function screenSlots(){
   return out;
 }
 
+// ---------------------------------------------- UX Pilot prompt composer
+// The app cannot drive UX Pilot directly, so it writes the prompt for you from
+// the proposal content. Same brand palette every time, so the screens drop into
+// the layouts without looking foreign.
+const BRAND = 'Light UI, generous white space, rounded 12px cards, soft shadows, '
+  + 'geometric sans typography, primary accent blue #2563EB, deep navy header '
+  + '#3A5498, success green #68AC5A, neutral text #11141A on #F6F8FB backgrounds. '
+  + 'Use realistic photographic imagery inside all image slots, no illustrations, '
+  + 'no clip art.';
+
+function uxPrompt(kind){
+  const D = data();
+  const app = D.meta.project_name || 'the app';
+  const screens = [];
+  (D.core_pages||[]).forEach(cp => {
+    const wide = cp.kind === 'device';
+    if ((kind === 'mobile') === wide) return;
+    if (cp.kind === 'grid') {
+      (cp.cards||[]).forEach(card => {
+        const title = arr(card.title).join(' ');
+        const points = (card.items||[]).map(i => i.text).filter(Boolean);
+        screens.push(`SCREEN — "${title}": ${points.join('. ')}.`);
+      });
+    } else {
+      const title = arr(cp.headline).join(' ');
+      const blocks = (cp.blocks||[]).map(b =>
+        `${b.title}: ${b.lead}${(b.bullets||[]).length ? '. ' + b.bullets.join('. ') : ''}`);
+      screens.push(`SCREEN — "${cp.eyebrow || title}", a ${cp.template === 8
+        ? 'wide web dashboard' : 'landscape tablet app'}. It must show: `
+        + blocks.join(' | ') + '.');
+    }
+  });
+  if (D.page9 && D.page9.include && kind === 'mobile')
+    screens.push(`SCREEN — "Re-engagement": a message or alert screen for `
+      + `${D.page9.headline ? arr(D.page9.headline).join(' ') : 'direct marketing'}.`);
+  if (!screens.length) return null;
+  return `Generate ${screens.length} hi-fi ${kind === 'mobile' ? 'mobile' : 'wide/desktop'} `
+    + `screens for "${app}". ${BRAND}\n\nEach screen must contain exactly the `
+    + `content described:\n\n${screens.join('\n\n')}`;
+}
+
+function copyPrompt(kind){
+  const text = uxPrompt(kind);
+  if (!text) return alert('No ' + kind + ' screens are needed for this proposal.');
+  navigator.clipboard.writeText(text).then(
+    () => alert('Copied. In UX Pilot choose the '
+      + (kind === 'mobile' ? 'mobile' : 'desktop') + ' canvas, paste, and generate.\n\n'
+      + 'Then export everything as one PDF and drop it in below.'),
+    () => { prompt('Copy this prompt:', text); });
+}
+$('#btnTestKeys').onclick = async () => {
+  busy('testing…');
+  try {
+    const r = await (await fetch('/api/test-keys')).json();
+    busy('');
+    alert('v0: ' + (r.v0.ok ? 'OK' : 'FAILED') + '\n' + r.v0.detail
+        + '\n\nScreenshots (' + r.screenshot.provider + '): '
+        + (r.screenshot.ok ? 'OK' : 'FAILED') + '\n' + r.screenshot.detail
+        + '\n\n' + (r.ready ? 'Ready to generate v0 screens.'
+                              : 'Fix the above, then redeploy.'));
+  } catch (e) { busy(''); alert(e.message); }
+};
+
+$('#btnAutoScreens').onclick = async () => {
+  busy($('#screenEngine').value === 'builtin' ? 'drawing the screens…'
+                                              : 'building the screens…');
+  try {
+    const r = await api('/api/auto-screens', {data: data(), brief: {},
+                                              engine: $('#screenEngine').value});
+    if ((r.errors||[]).length) alert('Some screens failed:\n' + r.errors.join('\n'));
+    if (!r.count) { busy(''); return alert('This proposal has no screen slots.'); }
+    doc.screens = Object.assign(doc.screens || {}, r.screens);
+    // point each slot at its screen
+    screenSlots().forEach(s => { if (r.screens[s.id]) s.set(s.id); });
+    persist();
+    busy('');
+    $('#btnScreens').click();
+    schedulePreview();
+  } catch (e) { busy(''); alert(e.message); }
+};
+
+$('#btnUxMobile').onclick = () => copyPrompt('mobile');
+$('#btnUxDesktop').onclick = () => copyPrompt('desktop');
+
+// screens lifted out of a UX Pilot PDF, held until they are assigned
+let pdfScreens = [];
+
+$('#pdfPick').onchange = () => {
+  const f = $('#pdfPick').files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = async () => {
+    busy('splitting the PDF…');
+    try {
+      const r = await api('/api/screens-from-pdf', {pdf: rd.result, scale: 2});
+      pdfScreens = r.screens;
+      renderPdfPages();
+      busy('');
+    } catch (e) { busy(''); alert(e.message); }
+  };
+  rd.readAsDataURL(f);
+};
+
+function renderPdfPages(){
+  const host = $('#pdfPages'); host.innerHTML = '';
+  if (!pdfScreens.length) return;
+  const slots = screenSlots();
+  const head = document.createElement('div');
+  head.className = 'row';
+  head.innerHTML = `<strong>${pdfScreens.length} screen(s) found</strong>`;
+  const auto = document.createElement('button');
+  auto.textContent = 'Assign in order';
+  auto.onclick = () => {
+    doc.screens = doc.screens || {};
+    slots.forEach((slot, i) => {
+      if (pdfScreens[i]) { doc.screens[slot.id] = pdfScreens[i].png; slot.set(slot.id); }
+    });
+    persist(); $('#btnScreens').click(); schedulePreview();
+  };
+  head.append(auto);
+  host.append(head);
+  const strip = document.createElement('div');
+  strip.style.cssText = 'display:flex;gap:8px;overflow-x:auto;padding:8px 0';
+  pdfScreens.forEach((s, i) => {
+    const box = document.createElement('div');
+    box.style.cssText = 'flex:0 0 auto;text-align:center';
+    const img = document.createElement('img');
+    img.src = s.png;
+    img.style.cssText = 'height:110px;border:1px solid var(--line);border-radius:8px;display:block';
+    const sel = document.createElement('select');
+    sel.style.cssText = 'margin-top:5px;max-width:130px;font:inherit;font-size:11px';
+    sel.innerHTML = '<option value="">unassigned</option>' +
+      slots.map(sl => `<option value="${sl.id}">${sl.label}</option>`).join('');
+    sel.onchange = () => {
+      if (!sel.value) return;
+      doc.screens = doc.screens || {};
+      doc.screens[sel.value] = s.png;
+      const slot = slots.find(x => x.id === sel.value);
+      if (slot) slot.set(slot.id);
+      persist(); $('#btnScreens').click(); schedulePreview();
+    };
+    box.append(img, sel);
+    strip.append(box);
+  });
+  host.append(strip);
+}
+
 $('#btnScreens').onclick = () => {
   const host = $('#screenList'); host.innerHTML = '';
   screenSlots().forEach(slot => {
@@ -563,6 +797,7 @@ $('#btnScreens').onclick = () => {
   });
   if (!host.children.length)
     host.innerHTML = '<p class="hint">No screen slots yet. Generate a proposal first.</p>';
+  renderPdfPages();
   dlgScreens.showModal();
 };
 
@@ -614,6 +849,8 @@ fetch('/api/health').then(r=>r.json()).then(j=>{
   if (!j.staged_endpoints)
     alert('This page is talking to an older server build. Redeploy, then hard-'
         + 'refresh with Cmd-Shift-R.');
+  if (j.v0_screens) $('#engineHint').textContent =
+    'v0 is connected via ' + j.screenshot_provider + '.';
   if (!j.anthropic_key_set)
     alert('ANTHROPIC_API_KEY is not set on the server. Generate will fail.');
 }).catch(()=>{});

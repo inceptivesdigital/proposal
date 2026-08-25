@@ -31,6 +31,22 @@ type what you want, e.g. "make this punchier".
 
 That is the whole job. Three minutes, most of it reading.
 
+## Editing on the design itself
+
+Hover the preview and any editable text highlights. Click it, type, click away.
+The page redraws with your words in the right font, size and position.
+
+- **Escape** cancels
+- **Cmd-Enter** (Ctrl-Enter on Windows) commits
+- Everything is versioned, so Versions then Restore undoes anything
+
+The panel on the left still exists for the things a click cannot do: adding and
+deleting cards, reordering milestones, changing icons.
+
+Fields shown greyed with "edited by hand" cannot be clicked on the design.
+Prices, client details and the page 14 legal statements are deliberately typed,
+never rewritten in place.
+
 ## Things worth knowing
 
 **Prices are never written by the AI.** It writes descriptions; the amounts come
@@ -51,13 +67,25 @@ whole proposal before the screens exist.
 **Save your work.** "Save JSON" downloads the proposal, "Open JSON" loads it
 back. Until server storage is added, this is the backup.
 
-## Attaching UI screens
+## UI screens
 
-1. Generate the screens in UX Pilot, export as PNG
-2. Click **UI screens** in the toolbar
-3. You get one slot per screen the proposal needs, each labelled with its page
-   and card, e.g. "Page 5 · Onboarding & Search Setup"
-4. Choose a file for each slot. The preview updates immediately.
+1. Click **UI screens**
+2. Click **Generate all screens**
+
+That is the whole job. The app reads the proposal, designs a screen for every
+feature card and every interface, draws them in the Inceptives palette and
+attaches them. Nothing is exported, uploaded or pasted.
+
+Each screen is a real layout: headers, search fields, filter chips, listing
+tiles, list rows with status pills, KPI cards, charts. The content comes from
+the card it belongs to, so the screens always match the words next to them.
+
+### If you would rather use UX Pilot
+
+Open "Use UX Pilot instead" in the same dialog. Copy the mobile prompt, paste it
+into UX Pilot's mobile canvas, do the same with the wide-screen prompt on the
+desktop canvas, export everything as one PDF, and drop the PDF in. Each page is
+split and cropped automatically, then assign them in order.
 
 Slots you leave empty print a dashed "UI screen pending" box, so a proposal can
 be reviewed and even sent internally before the screens exist. Screens are saved

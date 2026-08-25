@@ -1,7 +1,7 @@
 """Turns a proposal JSON into the finished 15-page PDF. No AI, no network."""
 from reportlab.pdfgen import canvas
 
-from .kit import W, H, register_fonts, QA, qa_reset
+from .kit import W, H, register_fonts, QA, TEXTMAP, qa_reset, set_page
 from . import pages_a as A
 from . import pages_b as B
 from .model import check_milestones
@@ -17,6 +17,7 @@ def page_plan(data, screens):
             ("App Overview", lambda c: A.page3(c, data)),
             ("Differentiator", lambda c: A.page4(c, data))]
     for i, spec in enumerate(data.get("core_pages", [])):
+        spec["_path"] = "core_pages.%d" % i
         plan.append(("Core Features %d" % (i+1),
                      lambda c, s=spec: A.core_page(c, s, screens)))
     if data.get("page9", {}).get("include"):
@@ -50,6 +51,7 @@ def render(data, out_path, screens=None, only=None):
     c.setAuthor("Inceptives Digital")
     failures = []
     for i in wanted:
+        set_page(i)
         try:
             plan[i][1](c)
         except Exception as exc:                            # noqa: BLE001
@@ -60,7 +62,7 @@ def render(data, out_path, screens=None, only=None):
     c.save()
     return {"path": out_path, "pages": len(plan),
             "names": [n for n, _ in plan], "failures": failures,
-            "qa": list(QA),
+            "qa": list(QA), "textmap": list(TEXTMAP),
             "milestones_ok": ok, "milestone_warning": msg}
 
 

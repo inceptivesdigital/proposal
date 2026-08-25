@@ -180,3 +180,38 @@ model and stage 1 should never be the thing that times out.
 2. Network tab, tick **Preserve log**
 3. Click Generate, wait for the failure
 4. Right-click any row, Save all as HAR with content
+
+
+## High-definition screens through v0
+
+The v0 Platform API is headless: post a prompt, v0 builds the screen and serves
+it from a Vercel Sandbox, and you get a preview URL. The app screenshots that
+URL and drops the PNG into the proposal. Nothing is exported or uploaded.
+
+Three variables switch it on:
+
+    V0_API_KEY             vercel.com/account/tokens
+    SCREENSHOT_PROVIDER    screenshotone | urlbox | browserless
+    SCREENSHOT_API_KEY     that provider's key
+
+Optional: `V0_MODEL` (default v0-1.5-md), `V0_POLL_SECONDS`, `V0_POLL_LIMIT`.
+
+`/api/health` reports `v0_screens: true` once all three are set, but that only
+means the variables exist. To check the keys actually work, open the UI screens
+dialog and click **Test keys**, or hit `/api/test-keys` directly. It calls both
+services for real and tells you which one failed and why:
+
+- "v0 rejected the key (HTTP 401)" — wrong or expired V0_API_KEY
+- "Provider rejected the key" — for ScreenshotOne, you used the secret key
+  instead of the access key
+- "Key works but you are out of quota" — the key is right, the plan is spent
+
+The engine picker in the screens dialog has three settings. **Best available**
+uses v0 when the keys are present and falls back to the built-in renderer when
+they are not. **v0** forces the API. **Built in** forces the instant renderer,
+which is useful while drafting because it costs nothing and takes a second.
+
+One caveat worth knowing before you buy credits: v0 preview URLs are served from
+a sandbox, and if a URL ever requires authentication the screenshot provider will
+photograph a login page instead of the screen. Generate one screen first and look
+at it before running a whole proposal.

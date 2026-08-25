@@ -359,3 +359,66 @@ def _rows_from(descriptions, milestones):
                      "desc": "Technical support, bug fixing & performance "
                              "monitoring"})
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Screen specs
+# ---------------------------------------------------------------------------
+
+SCREEN_SYSTEM = """You design app screens as structured data. You are given the feature cards from a proposal and you return one screen spec per card.
+
+A spec is: {"id": "<the slot id you were given>", "device": "phone|tablet|web",
+            "blocks": [ ... ]}
+
+Block types, use only these:
+ {"type":"header","title":"...","right":"optional right-hand text"}
+ {"type":"search","text":"what is typed in the field"}
+ {"type":"chips","items":["Price","Beds"],"active":0}
+ {"type":"hero","caption":"text over the image","title":"...","subtitle":"...","tint":0}
+ {"type":"tiles","cols":2,"items":[{"title":"$589k","sub":"3 bd"}],"ratio":0.72}
+ {"type":"list","items":[{"title":"...","sub":"...","pill":"New","tone":"blue|green|amber|grey"}]}
+ {"type":"kpis","items":[{"label":"Revenue","value":"$128,450","delta":"+12.6%"}]}
+ {"type":"chart","title":"Revenue Overview"}
+ {"type":"split","left_label":"ASKING","left_value":"$624,000","right_label":"ESTIMATE","right_value":"$612,000"}
+ {"type":"fields","items":[{"label":"Email","value":"you@email.com"}]}
+ {"type":"button","label":"...","tone":"blue|green"}
+ {"type":"social"}
+ {"type":"nav","items":["Home","Tours","Profile"],"active":0}
+
+Rules. A phone screen fits about five blocks, a tablet or web screen about four. Put a header first and a nav last on phone screens. Use realistic sample content drawn from this client's business, never lorem ipsum and never another industry's words. Keep every string short enough to fit a phone width. Return {"screens": [ ... ]} and nothing else."""
+
+
+def make_screens(slots, brief, meta, client=None):
+    """slots: [{"id": ..., "device": ..., "title": ..., "points": [...]}]"""
+    payload = json.dumps({"slots": slots, "brief": brief,
+                          "project_name": meta.get("project_name"),
+                          "client_company": meta.get("client_company")},
+                         ensure_ascii=False)
+    out = _call(_client(client), SCREEN_SYSTEM, payload, 8000)
+    return out.get("screens", [])
+
+
+def screen_slots(data):
+    """Every screen this proposal needs, derived from its own content."""
+    slots = []
+    for cp in data.get("core_pages", []):
+        if cp.get("kind") == "grid":
+            for j, card in enumerate(cp.get("cards", [])):
+                title = " ".join(card.get("title") or [])
+                slots.append({
+                    "id": card.get("screen") or "p%s_c%d" % (cp.get("template"), j),
+                    "device": "phone", "title": title,
+                    "points": [i.get("text", "") for i in card.get("items", [])]})
+        elif cp.get("kind") == "device":
+            wide = "web" if cp.get("template") == 8 else "tablet"
+            slots.append({
+                "id": cp.get("screen") or "p%s_device" % cp.get("template"),
+                "device": wide, "title": cp.get("eyebrow") or "",
+                "points": ["%s: %s" % (b.get("title"), b.get("lead"))
+                           for b in cp.get("blocks", [])]})
+    p9 = data.get("page9") or {}
+    if p9.get("include"):
+        slots.append({"id": p9.get("screen") or "p9_phone", "device": "phone",
+                      "title": "Direct marketing",
+                      "points": [c.get("body", "") for c in p9.get("cards", [])]})
+    return slots

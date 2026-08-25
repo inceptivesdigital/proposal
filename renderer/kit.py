@@ -72,11 +72,17 @@ def fit_one_line(text, font, size, maxw, floor=8.0, step=0.2):
     return size
 
 
-def draw_lines(c, lines, x, y0, lead, font, size, colour=INK):
+def draw_lines(c, lines, x, y0, lead, font, size, colour=INK, path=None,
+               maxw=None):
     c.setFont(font, size)
     c.setFillColorRGB(*colour)
     for i, ln in enumerate(lines):
-        c.drawString(x, y0 - i*lead, ln)
+        c.drawString(x, y0 - i*lead, as_text(ln))
+    n = max(len(lines), 1)
+    if path:
+        width = maxw or max([sw(l, font, size) for l in lines] or [40])
+        map_field(path, x, y0, width, (n-1)*(lead or size) + size*1.25,
+                  size, font)
     return y0 - len(lines)*lead
 
 
@@ -190,10 +196,27 @@ def fit_box(img_w, img_h, x0, y0, w, h, anchor="right"):
 # here rather than left for someone to spot in a PDF.
 
 QA = []
+TEXTMAP = []          # {"page","path","x","y","w","h","size","font","align"}
+_PAGE = [0]
 
 
 def qa_reset():
     del QA[:]
+    del TEXTMAP[:]
+    _PAGE[0] = 0
+
+
+def set_page(n):
+    _PAGE[0] = n
+
+
+def map_field(path, x, y, w, h, size=10, font="G-Light", align="left"):
+    """Record a click target for the editor overlay. y is the text baseline."""
+    if not path:
+        return
+    TEXTMAP.append({"page": _PAGE[0], "path": path, "x": round(x, 1),
+                    "y": round(y, 1), "w": round(w, 1), "h": round(h, 1),
+                    "size": round(size, 2), "font": font, "align": align})
 
 
 def qa_note(page, kind, detail):

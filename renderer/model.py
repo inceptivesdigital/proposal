@@ -179,7 +179,12 @@ def money(value, region="US"):
     """2000 -> $2,000 . Strings pass through untouched (e.g. 'Included')."""
     if isinstance(value, str):
         return value
-    return "%s%s" % (CURRENCY.get(region, "$"), "{:,}".format(int(value)))
+    if value is None:
+        return ""
+    try:
+        return "%s%s" % (CURRENCY.get(region, "$"), "{:,}".format(int(value)))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def check_milestones(page12, region="US"):

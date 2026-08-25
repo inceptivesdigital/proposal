@@ -49,8 +49,11 @@ def page10(c, d):
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", 11.6)
         c.drawString(L["text_x"], ty, it["title"])
+        map_field("page10.stack.%d.title" % i, L["text_x"], ty, 120, 14,
+                  11.6, "G-Med")
         draw_lines(c, lines, L["text_x"], ty - 13.5, 11.0, "G-Light", 8.8,
-                   (0.30, 0.34, 0.41))
+                   (0.30, 0.34, 0.41), path="page10.stack.%d.body" % i,
+                   maxw=L["w"] - (L["text_x"]-L["x"]) - 16)
         if i:
             c.setStrokeColorRGB(0.90, 0.92, 0.95)
             c.setLineWidth(0.7)
@@ -86,8 +89,11 @@ def page10(c, d):
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", ts)
         c.drawString(R["text_x"], cy + 2.4 + (len(lines)-1)*4.6, s["title"])
+        map_field("page10.services.%d.title" % i, R["text_x"],
+                  cy + 2.4 + (len(lines)-1)*4.6, R["card_w"]-24, 13, ts, "G-Med")
         draw_lines(c, lines, R["text_x"], cy - 8.4 + (len(lines)-1)*4.6, 9.4,
-                   "G-Light", 7.9, (0.30, 0.34, 0.41))
+                   "G-Light", 7.9, (0.30, 0.34, 0.41),
+                   path="page10.services.%d.body" % i, maxw=R["card_w"]-24)
 
     F = P10["foot"]
     fy0, fy1 = H-F["top"], H-F["bot"]
@@ -189,6 +195,8 @@ def page12(c, d):
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", 13.04)
         c.drawString(C["title_x"], ty2, r["title"])
+        map_field("page12.rows.%d.title" % i, C["title_x"], ty2, 240, 16,
+                  13.04, "G-Med")
         tw = sw(r["title"], "G-Med", 13.04)
         if r.get("duration"):
             c.setFillColorRGB(*GREY)
@@ -197,6 +205,8 @@ def page12(c, d):
         draw_block(c, r.get("desc", ""), C["desc_x"], y + ch - 37.6, 11.6,
                    "G-Light", 8.92, 300, 2, (0.30, 0.34, 0.41), 12,
                    "milestone %d description" % (i+1))
+        map_field("page12.rows.%d.desc" % i, C["desc_x"], y + ch - 37.6, 300,
+                  23, 8.92, "G-Light")
         amount = r.get("amount")
         label = amount if isinstance(amount, str) else money(amount, region)
         inc = str(label).lower() == "included"

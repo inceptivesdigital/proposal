@@ -29,10 +29,12 @@ def page1(c, d):
         c.setFont("G-Med", size)
         c.setFillColorRGB(*(INK if i == 0 else BLUE_T))
         c.drawString(P1["title_x"][i], P1["title_y"][i], t[i])
+        map_field("page1.title.%d" % i, P1["title_x"][i], P1["title_y"][i],
+                  P1["title_maxw"][i], size*1.2, size, "G-Med")
     draw_lines(c, wrap(d["page1"]["description"], "G-Light", P1["body_size"],
                        P1["body_maxw"])[:4],
                P1["body_x"], P1["body_y"], P1["body_lead"], "G-Light",
-               P1["body_size"])
+               P1["body_size"], path="page1.description", maxw=P1["body_maxw"])
     rows = [("Prepared for", m["client_contact"], m["client_company"]),
             ("Prepared by", m["signer_name"], m["signer_role"]),
             ("Date", m.get("date", ""), None)]
@@ -105,7 +107,8 @@ def page3(c, d):
         size -= 0.3
     lines, size = fit_block(p["one_liner"], "G-Med", size, P3["head_maxw"], 3,
                             floor=14)
-    draw_lines(c, lines, P3["head_x"], P3["head_y"], P3["head_lead"], "G-Med", size)
+    draw_lines(c, lines, P3["head_x"], P3["head_y"], P3["head_lead"], "G-Med",
+               size, path="page3.one_liner", maxw=P3["head_maxw"])
     lines = []
     for i, para in enumerate(p["description"]):
         if i:
@@ -113,12 +116,24 @@ def page3(c, d):
         lines += wrap(para, "G-Light", P3["body_size"], P3["body_maxw"])
     c.setFont("G-Light", P3["body_size"])
     c.setFillColorRGB(*INK)
+    para, start = 0, 0
     for i, ln in enumerate(lines):
         if ln:
             c.drawString(P3["body_x"], P3["body_y"] - i*P3["body_lead"], ln)
+        else:
+            map_field("page3.description.%d" % para, P3["body_x"],
+                      P3["body_y"] - start*P3["body_lead"], P3["body_maxw"],
+                      (i-start)*P3["body_lead"], P3["body_size"], "G-Light")
+            para += 1; start = i + 1
+    if start < len(lines):
+        map_field("page3.description.%d" % para, P3["body_x"],
+                  P3["body_y"] - start*P3["body_lead"], P3["body_maxw"],
+                  (len(lines)-start)*P3["body_lead"], P3["body_size"], "G-Light")
     c.setFillColorRGB(*INK)
     c.setFont("G-Semi", P3["h_size"])
     c.drawCentredString(P3["h_cx"], P3["h_y"], p["surfaces_heading"])
+    map_field("page3.surfaces_heading", P3["h_cx"]-120, P3["h_y"], 240,
+              P3["h_size"]*1.3, P3["h_size"], "G-Semi", "center")
     r = P3["rule"]
     c.setFillColorRGB(*NAVY)
     c.rect(r["cx"] - r["w"]/2, r["y"], r["w"], r["h"], stroke=0, fill=1)
@@ -148,14 +163,19 @@ def page3(c, d):
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", ts)
         c.drawCentredString(cx, R["top"]-R["title_dy"], s["title"])
+        map_field("page3.surfaces.%d.title" % i, x+4, R["top"]-R["title_dy"],
+                  cw-8, ts*1.3, ts, "G-Med", "center")
         c.setFillColorRGB(*NAVY)
         c.rect(cx - R["rule_w"]/2, R["top"]-R["rule_dy"], R["rule_w"],
                R["rule_h"], stroke=0, fill=1)
         c.setFillColorRGB(*INK)
         bs = R["body_size"] if n <= 4 else 8.8
         c.setFont("G-Light", bs)
-        for j, ln in enumerate(wrap(s.get("blurb", ""), "G-Light", bs, cw-12)[:4]):
+        blurb = wrap(s.get("blurb", ""), "G-Light", bs, cw-12)[:4]
+        for j, ln in enumerate(blurb):
             c.drawCentredString(cx, R["top"]-R["body_dy"] - j*R["body_lead"], ln)
+        map_field("page3.surfaces.%d.blurb" % i, x+4, R["top"]-R["body_dy"],
+                  cw-8, max(len(blurb), 1)*R["body_lead"], bs, "G-Light", "center")
 
 
 # --------------------------------------------------------------- page 4
@@ -185,12 +205,16 @@ def page4(c, d):
     c.setFont("G-Med", size)
     for i, ln in enumerate(lines):          # bottom-anchored: the rule never moves
         c.drawString(P4["one_x"], P4["one_y"] + (len(lines)-1-i)*P4["one_lead"], ln)
+    map_field("page4.one_liner", P4["one_x"], P4["one_y"], P4["one_maxw"],
+              len(lines)*P4["one_lead"], size, "G-Med")
     dv = P4["divider"]
     c.setFillColorRGB(*RULE_GREY)
     c.rect(dv["x"], dv["y"], dv["w"], dv["h"], stroke=0, fill=1)
     draw_block(c, p["description"], P4["desc_x"], P4["desc_y"], P4["desc_lead"],
                "G-Light", P4["desc_size"], P4["desc_maxw"], 7, INK, 4,
                "differentiator description")
+    map_field("page4.description", P4["desc_x"], P4["desc_y"], P4["desc_maxw"],
+              7*P4["desc_lead"], P4["desc_size"], "G-Light")
     cards = [c_ for c_ in p["cards"][:3]
              if as_text(c_.get("title")).strip() or as_text(c_.get("body")).strip()]
     if len(cards) < 3:
@@ -210,10 +234,13 @@ def page4(c, d):
         ys = P4["title2_y"] if len(tl) == 2 else [sum(P4["title2_y"])/2]
         for ln, y in zip(tl, ys):
             c.drawString(P4["title2_x"][i], y, ln)
+        map_field("page4.cards.%d.title" % i, P4["title2_x"][i], ys[0],
+                  P4["title2_maxw"], len(tl)*14, ts, "G-Reg")
         draw_lines(c, wrap(card["body"], "G-XLight", P4["body_size"],
                            P4["body_maxw"])[:4],
                    P4["body_x"][i], P4["body_y"], P4["body_lead"], "G-XLight",
-                   P4["body_size"])
+                   P4["body_size"], path="page4.cards.%d.body" % i,
+                   maxw=P4["body_maxw"])
 
 
 # --------------------------------------------------- pages 5-8 (core features)
@@ -282,12 +309,14 @@ def _core_grid(c, page, spec, screens):
     eyebrow(c, *P5["eyebrow"][:2], spec["eyebrow"], P5["eyebrow"][2])
     fit_headline(c, P5["headline"][0], P5["headline"][1], spec["headline"],
                  P5["headline"][2], W - P5["headline"][0] - 30, page=page)
-    for i, card in enumerate(spec["cards"][:4]):
+    for i, card in enumerate(spec["cards"][:len(P5["icon"])]):
         draw_icon(c, *P5["icon"][i], 21, ic(card.get("icon", "ic_home")))
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", 12.68)
-        for ln, y in zip(card["title"][:2], P5["ty"][i]):
+        for j, (ln, y) in enumerate(zip(card["title"][:2], P5["ty"][i])):
             c.drawString(P5["tx"][i], y, ln)
+            map_field("%s.cards.%d.title.%d" % (spec["_path"], i, j),
+                      P5["tx"][i], y, 120, 15, 12.68, "G-Med")
         _grid_items(c, card["items"], P5["bx"][i], P5["by"][i], P5["bw"][i],
                     page, i)
         x0, x1, y0, y1 = P5["slots"][i]
@@ -308,19 +337,23 @@ def _core_list(c, page, spec):
     eyebrow(c, *P6["eyebrow"][:2], spec["eyebrow"], P6["eyebrow"][2])
     fit_headline(c, P6["headline"][0], P6["headline"][1], spec["headline"],
                  P6["headline"][2], W - P6["headline"][0] - 30, page=page)
-    for i, card in enumerate(spec["cards"][:4]):
+    for i, card in enumerate(spec["cards"][:len(P6["icon_y"])]):
         draw_icon(c, P6["icon_x"], P6["icon_y"][i], 26,
                   ic(card.get("icon", "ic_check")))
         c.setFillColorRGB(*INK)
         c.setFont("G-Reg", 13.39)
         c.drawString(P6["title_x"], P6["title_y"][i], card["title"])
-        for text, y in zip(card["items"], P6["item_y"][i]):
+        map_field("%s.cards.%d.title" % (spec["_path"], i), P6["title_x"],
+                  P6["title_y"][i], 240, 16, 13.39, "G-Reg")
+        for j, (text, y) in enumerate(zip(card["items"], P6["item_y"][i])):
             draw_icon(c, P6["check_x"], y+3.0, 9.6, IC.ic_check,
                       (0.24, 0.27, 0.32), 1.5)
             c.setFillColorRGB(*INK)
             c.setFont("G-Light", 9.5)
-            c.drawString(P6["item_x"][i], y,
-                         wrap(text, "G-Light", 9.5, P6["item_w"])[0])
+            lines = wrap(text, "G-Light", 9.5, P6["item_w"]) or [""]
+            c.drawString(P6["item_x"][i], y, lines[0])
+            map_field("%s.cards.%d.items.%d" % (spec["_path"], i, j),
+                      P6["item_x"][i], y, P6["item_w"], 12, 9.5, "G-Light")
 
 
 def _core_device(c, page, spec, screens, cfg):
@@ -345,6 +378,11 @@ def _core_device(c, page, spec, screens, cfg):
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", tsize)
         c.drawString(cfg["title_x"], anchor, blk["title"])
+        map_field("%s.blocks.%d.title" % (spec["_path"], i), cfg["title_x"],
+                  anchor, cfg["body_w"], tsize*1.3, tsize, "G-Med")
+        map_field("%s.blocks.%d.lead" % (spec["_path"], i), cfg["body_x"],
+                  anchor - (13.6 if small else 14.9), cfg["body_w"], 24,
+                  bsize, "G-Light")
         items = [(False, blk["lead"])] + [(True, b) for b in blk.get("bullets", [])]
         flow(c, items, cfg["body_x"], anchor - (13.6 if small else 14.9),
              bsize, cfg["body_w"], lead, gap)

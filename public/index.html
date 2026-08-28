@@ -1,0 +1,2020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inceptives Digital Proposal Studio</title>
+<style>
+  :root{
+    --ink:#12151c; --muted:#6b7280; --faint:#9aa3b2; --line:#e7ebf2;
+    --bg:#f4f6fa; --blue:#4160aa; --blue-soft:#eaeffa;
+    --green:#6d9c4f; --green-soft:#eef6e6; --brand-green:#a4d189; --amber:#9a6b12; --amber-soft:#fdf4e3;
+    --red:#b4443c; --red-soft:#fdeceb;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;
+    border-radius:9px;padding:7px 13px;color:var(--ink)}
+  button:hover{border-color:#cfd7e6;background:#fbfcfe}
+  button:disabled{opacity:.5;cursor:default}
+  button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  button.primary:hover{background:#37528f}
+  button.ghost{border:none;background:none;color:var(--muted);padding:5px 8px}
+  button.ghost:hover{background:#eef1f6}
+  input,textarea,select{font:inherit;color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:8px 10px;background:#fff;width:100%}
+  textarea{resize:vertical;line-height:1.45}
+  input:focus,textarea:focus,select:focus{outline:2px solid #dfe6fb;border-color:var(--blue)}
+
+  .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+  header{display:flex;align-items:center;gap:10px;padding:11px 20px;background:#fff;
+    border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:11px;min-width:220px}
+  .brand .mark{width:34px;height:34px;border-radius:9px;background:var(--blue);color:#fff;
+    display:grid;place-items:center;font-weight:700;font-size:13px}
+  .brand b{display:block;font-size:14px;letter-spacing:-.01em}
+  .brand span{display:block;font-size:11.5px;color:var(--muted)}
+  .doctitle{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;
+    font-size:13.5px}
+  .doctitle .dot{width:8px;height:8px;border-radius:50%;background:var(--amber)}
+  .doctitle .dot.saved{background:var(--green)}
+  .doctitle .state{color:var(--faint);border-left:1px solid var(--line);padding-left:12px;
+    font-size:12.5px}
+  /* every button carries a one-line explanation underneath */
+  .btnwrap{display:flex;flex-direction:column;align-items:center;gap:2px}
+  .btnwrap .hint{font-size:9.5px;color:var(--faint);line-height:1.2;text-align:center;
+    max-width:104px}
+  header .btnwrap button{width:100%}
+  .toolbar .btnwrap .hint{max-width:120px}
+  .avatar{width:32px;height:32px;border-radius:50%;background:#e8ecf5;display:grid;
+    place-items:center;font-size:12px;font-weight:600;color:#55607a}
+
+  .body{display:grid;grid-template-columns:242px minmax(0,1fr) 366px;min-height:0}
+  .rail,.inspector{background:#fff;overflow:auto;min-height:0}
+  .rail{border-right:1px solid var(--line)}
+  .inspector{border-left:1px solid var(--line)}
+  .rail .head{display:flex;align-items:center;padding:14px 16px 11px;
+    border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
+  .rail .head .t{font-size:10.5px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase}
+  .rail .head b{display:block;font-size:15px;margin-top:2px}
+  .warnpill{margin-left:auto;display:flex;align-items:center;gap:5px;
+    background:var(--amber-soft);color:var(--amber);border-radius:99px;padding:3px 9px;
+    font-size:11.5px;font-weight:600}
+  .pagecard{display:flex;gap:11px;align-items:center;padding:10px 12px;margin:7px 10px;
+    border:1px solid transparent;border-radius:12px;cursor:pointer}
+  .pagecard:hover{background:#f7f9fc}
+  .pagecard.on{border-color:var(--blue);background:var(--blue-soft)}
+  .pagecard .n{font-size:11px;color:var(--faint);width:14px;text-align:right}
+  .pagecard .thumb{width:42px;height:59px;border-radius:5px;border:1px solid var(--line);
+    background:#f2f5fa;flex:0 0 auto;object-fit:cover}
+  .pagecard .meta b{display:block;font-size:13px;letter-spacing:-.01em}
+  .pagecard .meta span{display:block;font-size:11.5px;color:var(--muted)}
+
+  .canvas{display:grid;grid-template-rows:auto auto 1fr;min-height:0;min-width:0}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:10px 18px;
+    border-bottom:1px solid var(--line);background:#fff;flex-wrap:wrap}
+  #btnComment.primary{background:var(--amber);border-color:var(--amber)}
+  .zoom{display:flex;align-items:center;gap:2px;border:1px solid var(--line);
+    border-radius:9px;padding:2px}
+  .zoom button{border:none;background:none;padding:4px 9px}
+  .zoom .val{font-size:12.5px;min-width:46px;text-align:center;color:var(--muted)}
+  .checkspill{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12.5px;
+    color:var(--muted)}
+  .checkspill .dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+  .checkspill.warn .dot{background:var(--amber)}
+  .toast{margin:10px 18px 0;background:var(--green-soft);border:1px solid #cfe6d6;
+    color:#2f6b3f;border-radius:11px;padding:9px 13px;font-size:13px;display:flex;
+    align-items:center;gap:10px}
+  .toast.err{background:var(--red-soft);border-color:#f0c4c0;color:#8d3831}
+  .toast button{margin-left:auto}
+  .stagewrap{overflow:auto;padding:26px;display:grid;place-items:start center}
+  .stage{position:relative;line-height:0;box-shadow:0 18px 48px rgba(24,32,56,.14);
+    border-radius:4px;background:#fff}
+  .stage img{display:block;border-radius:4px}
+  .hot{position:absolute;border-radius:4px;cursor:text;
+    outline:1.5px solid rgba(59,91,219,0);transition:outline-color .12s,background .12s}
+  .hot:hover{outline-color:rgba(65,96,170,.55);background:rgba(65,96,170,.06)}
+  .hot.sel{outline-color:var(--blue);background:rgba(65,96,170,.09)}
+  /* comment marks drawn over the page */
+  .stage.commenting{cursor:crosshair}
+  .stage.commenting .hot{cursor:crosshair}
+  .stage.commenting .hot:hover{outline-color:var(--amber);
+    background:rgba(214,158,46,.10)}
+  .pin{position:absolute;border:2px solid var(--amber);background:rgba(214,158,46,.10);
+    border-radius:6px;cursor:pointer}
+  .pin.done{border-color:var(--green);background:rgba(61,138,79,.08)}
+  .pin b{position:absolute;top:-11px;left:-11px;width:22px;height:22px;
+    border-radius:50%;background:var(--amber);color:#fff;font-size:11px;
+    display:grid;place-items:center}
+  .pin.done b{background:var(--green)}
+  #drawbox{position:absolute;border:2px dashed var(--blue);
+    background:rgba(65,96,170,.09);border-radius:6px;pointer-events:none;display:none}
+  /* the comment box that opens against the marked area */
+  #popover{position:absolute;z-index:20;width:274px;background:#fff;
+    border:1px solid var(--line);border-radius:12px;padding:12px;display:none;
+    box-shadow:0 18px 44px rgba(20,28,48,.18)}
+  #popover .who{font-size:11px;color:var(--faint);margin-bottom:7px}
+  #popover textarea{min-height:66px}
+  #popover .row{display:flex;gap:7px;margin-top:9px;align-items:center}
+  #popover .row label{font-size:11.5px;color:var(--muted);display:flex;
+    gap:5px;align-items:center;margin-right:auto}
+  #popover .row input[type=checkbox]{width:auto}
+  .pin .flag{position:absolute;top:-9px;right:-9px;width:10px;height:10px;
+    border-radius:50%;background:var(--amber);border:2px solid #fff}
+  .pin.done .flag{background:var(--green)}
+  .cmt{border:1px solid var(--line);border-left:3px solid var(--amber);
+    border-radius:10px;padding:11px 12px;margin-bottom:9px;cursor:pointer}
+  .cmt.done{border-left-color:var(--green);opacity:.72}
+  .cmt .top{display:flex;gap:8px;align-items:center;font-size:11.5px;
+    color:var(--muted);margin-bottom:4px}
+  .cmt .num{width:20px;height:20px;border-radius:50%;background:var(--amber);
+    color:#fff;font-size:11px;display:grid;place-items:center;flex:0 0 auto}
+  .cmt.done .num{background:var(--green)}
+  .cmt .body{font-size:13px}
+  .cmt .where{font-size:11.5px;color:var(--faint);margin-top:3px}
+
+  .tabs{display:flex;gap:0;padding:12px 10px 0;border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:#fff;z-index:2}
+  .tabs button{border:none;background:none;padding:9px 9px;color:var(--muted);
+    border-bottom:2px solid transparent;border-radius:0;font-size:13px;
+    white-space:nowrap}
+  .tabs button.on{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+  .tabs .count{background:#eef1f6;border-radius:99px;padding:1px 7px;font-size:11px;
+    margin-left:6px;color:var(--muted)}
+  .insp{padding:16px}
+  .sel{background:#f7f9fd;border:1px solid var(--line);border-radius:12px;padding:13px 14px;
+    margin-bottom:16px}
+  .sel .k{font-size:10.5px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase}
+  .sel b{display:block;font-size:15px;margin-top:3px;letter-spacing:-.01em}
+  .sel code{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+  .lab{font-size:12px;color:var(--muted);margin:0 0 6px}
+  .meter{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);
+    margin-top:6px}
+  .meter .fit{color:var(--green);font-weight:600}
+  .meter .fit.tight{color:var(--amber)}
+  .meter .fit.over{color:var(--red)}
+  .note{display:flex;gap:9px;background:var(--green-soft);border:1px solid #cfe6d6;
+    border-radius:11px;padding:11px 12px;margin-top:12px;font-size:12.5px;color:#356b45}
+  .note.hand{background:#f3f5f9;border-color:var(--line);color:#525c70}
+  .note b{display:block;margin-bottom:2px}
+  .sect{font-size:10.5px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase;
+    margin:22px 0 8px}
+  .act{display:flex;align-items:center;width:100%;padding:11px 0;
+    border:none;border-bottom:1px solid var(--line);background:none;border-radius:0;
+    justify-content:flex-start;gap:8px}
+  .act:hover{background:none;color:var(--blue)}
+  .tag{margin-left:auto;font-size:11px;border-radius:99px;padding:2px 9px;
+    background:var(--green-soft);color:var(--green)}
+  .tag.warn{background:var(--amber-soft);color:var(--amber)}
+  .tag.off{background:#eef1f6;color:var(--muted)}
+  .issue{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:9px;
+    padding:10px 12px;margin-bottom:9px;font-size:12.5px}
+  .issue.err{border-left-color:var(--red)}
+  .issue b{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .item{border:1px solid var(--line);border-radius:11px;padding:11px;margin:9px 0;
+    background:#fcfdff}
+  .item .row{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+  .item .row strong{font-size:12px;color:var(--muted);margin-right:auto}
+  .field{margin:0 0 13px}
+  .empty{color:var(--faint);font-size:13px;padding:22px 4px;text-align:center}
+
+  dialog{border:none;border-radius:16px;padding:0;width:min(660px,94vw);
+    box-shadow:0 28px 70px rgba(20,28,48,.26)}
+  dialog::backdrop{background:rgba(18,24,40,.34)}
+  dialog h3{margin:0;padding:16px 20px;border-bottom:1px solid var(--line);font-size:15px}
+  dialog .in{padding:18px 20px;max-height:68vh;overflow:auto}
+  dialog footer{display:flex;gap:9px;justify-content:flex-end;padding:14px 20px;
+    border-top:1px solid var(--line)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .banner{border-radius:10px;padding:10px 12px;font-size:12.5px;margin:10px 0}
+  .banner.ok{background:var(--green-soft);color:#2f6b3f}
+  .banner.warn{background:var(--amber-soft);color:var(--amber)}
+  .vrow{display:flex;gap:10px;align-items:center;padding:9px 0;
+    border-bottom:1px solid var(--line);font-size:13px}
+  .vrow:last-child{border:none}
+  .vrow .n{font-weight:600;min-width:34px}
+  .vrow .m{color:var(--muted);font-size:12px;margin-right:auto}
+</style>
+</head>
+<body>
+<div id="gate" style="position:fixed;inset:0;background:var(--bg);z-index:50;
+  display:grid;place-items:center;padding:24px">
+  <div style="width:min(880px,100%);display:grid;gap:16px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="/assets/logo.png" alt="Inceptives Digital" style="height:38px">
+      <div style="border-left:1px solid var(--line);padding-left:12px">
+        <b style="font-size:15px">Proposal Studio</b>
+        <span style="display:block;font-size:12px;color:var(--muted)">
+          Accounts are limited to @inceptivesdigital.com</span></div>
+    </div>
+
+    <div id="signBox" style="background:#fff;border:1px solid var(--line);
+      border-radius:16px;padding:22px;max-width:420px">
+      <h3 style="margin:0 0 4px;font-size:17px" id="signTitle">Sign in</h3>
+      <p class="lab" id="signSub">Use your @inceptivesdigital.com address. Proposals are saved to your account.</p>
+      <div class="field" id="nameField" style="display:none">
+        <p class="lab">Your name</p><input id="aName"></div>
+      <div class="field"><p class="lab">Email</p><input id="aEmail" type="email"></div>
+      <div class="field"><p class="lab">Password</p><input id="aPass" type="password"
+        placeholder="at least 10 characters"></div>
+      <div id="authMsg"></div>
+      <button class="primary" id="btnAuth" style="width:100%">Sign in</button>
+      <div id="codeStep" style="display:none;margin-top:14px">
+        <div class="field"><p class="lab">Six-digit code from your email</p>
+          <input id="aCode" inputmode="numeric" maxlength="6"
+                 placeholder="000000" style="letter-spacing:5px;font-size:17px"></div>
+        <button class="primary" id="btnVerify" style="width:100%">Verify and continue</button>
+        <p class="lab" style="margin-top:9px;text-align:center">
+          <a href="#" id="resendCode" style="color:var(--blue)">Send another code</a></p>
+      </div>
+      <p class="lab" style="margin-top:12px;text-align:center">
+        <a href="#" id="toggleAuth" style="color:var(--blue)">Create an account instead</a></p>
+    </div>
+
+    <div id="listBox" style="background:#fff;border:1px solid var(--line);
+      border-radius:16px;padding:6px 0;display:none">
+      <div style="display:flex;align-items:center;padding:14px 20px 12px;
+        border-bottom:1px solid var(--line)">
+        <div><div class="t" style="font-size:10.5px;letter-spacing:.09em;
+          color:var(--faint);text-transform:uppercase">Your proposals</div>
+          <b style="font-size:15px" id="listCount">None yet</b></div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="btnNewFromList" class="primary">New proposal</button>
+          <button id="btnSignOut">Sign out</button>
+        </div>
+      </div>
+      <div id="proposalList" style="max-height:52vh;overflow:auto"></div>
+    </div>
+  </div>
+</div>
+
+<div class="app" style="display:none" id="appShell">
+  <header>
+    <div class="brand">
+      <img src="/assets/logo.png" alt="Inceptives Digital" style="height:30px">
+      <div style="border-left:1px solid var(--line);padding-left:11px">
+        <b>Proposal Studio</b><span>Inceptives Digital</span></div>
+    </div>
+    <div class="doctitle"><span class="dot" id="dirtyDot"></span>
+      <strong id="docName">Untitled proposal</strong>
+      <span class="state" id="docState">Working draft</span></div>
+    <div class="btnwrap"><button id="btnNew">New</button><span class="hint">Start from a call transcript</span></div>
+    <div class="btnwrap"><button id="btnVersions">Versions</button><span class="hint">See or restore earlier drafts</span></div>
+    <div class="btnwrap"><button id="btnSave">Save</button><span class="hint">Keep this version</span></div>
+    <div class="btnwrap"><button id="btnPdf">Download PDF</button><span class="hint">Export the finished file</span></div>
+    <div class="btnwrap"><button class="primary" id="btnPublish">Publish</button><span class="hint">Lock a version for the client</span></div>
+    <div class="avatar">HS</div>
+  </header>
+
+  <div class="body">
+    <aside class="rail">
+      <div class="head">
+        <div><div class="t">Proposal</div><b id="pageCount">15 pages</b></div>
+        <div class="warnpill" id="railWarn" style="display:none">⚠ <span>0</span></div>
+      </div>
+      <div id="pageList"></div>
+    </aside>
+
+    <section class="canvas">
+      <div class="toolbar">
+        <div class="btnwrap"><button class="ghost" id="btnUndo" title="Undo">↶</button>
+          <span class="hint">Undo</span></div>
+        <div class="btnwrap"><button class="ghost" id="btnRedo" title="Redo">↷</button>
+          <span class="hint">Redo</span></div>
+        <div class="btnwrap">
+          <div class="zoom"><button id="zoomOut">−</button>
+            <span class="val" id="zoomVal">72%</span><button id="zoomIn">+</button></div>
+          <span class="hint">Make the page bigger or smaller</span>
+        </div>
+        <div class="btnwrap"><button id="btnRewrite">✦ Rewrite selection</button><span class="hint">Let AI reword what you selected</span></div>
+        <div class="btnwrap"><button id="btnComment">Comment</button>
+          <span class="hint">Mark a spot and tell the assistant</span></div>
+        <div class="btnwrap"><button id="btnQA">Run QA &amp; fix</button>
+          <span class="hint">Check the whole proposal and repair it</span></div>
+        <div class="btnwrap"><button id="btnScreens">UI screens</button><span class="hint">Add the app screens</span></div>
+        <div class="checkspill" id="checkPill"><span class="dot"></span>
+          <span id="checkText">No layout checks</span></div>
+      </div>
+      <div id="toastWrap"></div>
+      <div id="progress" style="display:none;margin:10px 18px 0;background:#fff;
+        border:1px solid var(--line);border-radius:11px;padding:11px 13px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+          <strong id="progStep">Working</strong>
+          <span id="progDetail" style="color:var(--muted);font-size:12.5px"></span>
+          <span id="progLeft" style="margin-left:auto;color:var(--faint);
+            font-size:12px"></span>
+        </div>
+        <div style="height:6px;background:#eef1f6;border-radius:99px;margin-top:9px">
+          <div id="progBar" style="height:100%;width:0%;background:var(--blue);
+            border-radius:99px;transition:width .35s"></div>
+        </div>
+      </div>
+      <div id="blank" style="display:none;padding:60px 20px;text-align:center">
+        <p style="font-size:15px;margin:0 0 6px">No proposal open</p>
+        <p class="lab" style="margin-bottom:16px">Start one from a call
+          transcript, or open a saved proposal.</p>
+        <button class="primary" id="btnBlankNew">New from transcript</button>
+        <button id="btnBlankList">My proposals</button>
+      </div>
+      <div class="stagewrap" id="stagewrap"><div class="stage" id="stage">
+        <img id="preview" alt="page preview">
+        <div id="overlay" style="position:absolute;inset:0"></div>
+        <div id="pins" style="position:absolute;inset:0"></div>
+        <div id="drawbox"></div>
+        <div id="popover">
+          <div class="who" id="popWhere"></div>
+          <textarea id="popText" placeholder="What should change here?"></textarea>
+          <div class="row">
+            <label><input type="checkbox" id="popNow" checked> Ask the assistant now</label>
+            <button class="ghost" id="popCancel">Cancel</button>
+            <button class="primary" id="popSave">Add</button>
+          </div>
+        </div>
+      </div></div>
+    </section>
+
+    <aside class="inspector">
+      <div class="tabs">
+        <button class="on" data-tab="content">Content</button>
+        <button data-tab="checks">Checks</button>
+        <button data-tab="agent">Assistant</button>
+        <button data-tab="notes">Comments<span class="count" id="noteCount">0</span></button>
+      </div>
+      <div class="insp" id="tabContent"></div>
+      <div class="insp" id="tabChecks" style="display:none"></div>
+      <div class="insp" id="tabAgent" style="display:none">
+        <p class="lab">Tell the assistant what to change. It can reword anything,
+          add or remove cards, drop a page, or write a whole new page in the same
+          branding. Prices, client details and the legal statements are never
+          touched.</p>
+        <div id="chatLog" style="margin:12px 0"></div>
+        <div class="field"><textarea id="chatText" rows="3"
+          placeholder="Add a page about security and compliance"></textarea></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+          <input type="file" id="chatImage" accept="image/png,image/jpeg"
+                 style="font-size:12px">
+          <span class="hint">Attach an image to place in the proposal</span>
+        </div>
+        <div id="chatAttached"></div>
+        <button class="primary" id="btnChat" style="width:100%">Make the change</button>
+        <div id="prefBox"></div>
+        <div class="sect">Try</div>
+        <div id="chatIdeas"></div>
+        <div class="sect">What this system has learned</div>
+        <p class="lab">Anything your team corrects on two or more proposals
+          becomes a rule the generator follows from then on, for every client
+          and every user.</p>
+        <div id="ruleList"></div>
+      </div>
+      <div class="insp" id="tabNotes" style="display:none"></div>
+    </aside>
+  </div>
+</div>
+
+<dialog id="dlgNew"><h3>New proposal from transcript</h3><div class="in">
+  <div class="grid2">
+    <div class="field"><p class="lab">Client contact</p><input id="nContact"></div>
+    <div class="field"><p class="lab">Client company</p><input id="nCompany"></div>
+    <div class="field"><p class="lab">Project name</p><input id="nProject"></div>
+    <div class="field"><p class="lab">Governing law</p><select id="nRegion">
+      <option value="US">United States — State of Texas</option>
+      <option value="UK">United Kingdom — England &amp; Wales</option></select></div>
+    <div class="field"><p class="lab">Currency</p><select id="nCurrency"></select></div>
+    <div class="field"><p class="lab">Signer name</p><input id="nSigner"></div>
+    <div class="field"><p class="lab">Signer role</p><input id="nRole" value="Account Strategist"></div>
+    <div class="field"><p class="lab">Total price</p><input id="nTotal" inputmode="numeric"></div>
+    <div class="field"><p class="lab">Milestone amounts</p>
+      <input id="nMilestones" placeholder="2000, 3000, 2000, 3000, 2000, 2000"></div>
+  </div>
+  <div id="nSum"></div>
+  <div class="field">
+    <p class="lab">Transcript or written requirements</p>
+    <div style="display:flex;gap:9px;align-items:center;margin-bottom:8px">
+      <input type="file" id="nDoc" multiple
+             accept=".pdf,.docx,.txt,.md,.rtf,.vtt,.srt,.csv"
+             style="font-size:12px">
+      <span class="hint">Upload call notes or a brief: PDF, Word, text or a
+        subtitle export. You can add several.</span>
+    </div>
+    <div id="docList"></div>
+    <textarea id="nTranscript" rows="9"
+      placeholder="Paste the call transcript here, or upload the documents above."></textarea>
+    <div class="meter"><span id="nChars">0 characters</span><span></span></div>
+  </div>
+</div><footer><button onclick="dlgNew.close()">Cancel</button>
+  <button class="primary" id="btnGenerate">Generate proposal</button></footer></dialog>
+
+<dialog id="dlgVersions"><h3>Version history</h3><div class="in" id="versionList"></div>
+  <footer><button onclick="dlgVersions.close()">Close</button></footer></dialog>
+
+<dialog id="dlgScreens"><h3>UI screens</h3><div class="in">
+  <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <button class="primary" id="btnFillMissing">Fill missing screens</button>
+    <button id="btnAutoScreens">Regenerate all</button>
+    <button id="btnOneScreen">Try one screen</button>
+    <button id="btnRecover">Fetch from v0</button>
+    <select id="screenEngine" style="width:auto">
+      <option value="auto">Best available</option>
+      <option value="fast">Fast (about a minute, photographic)</option>
+      <option value="v0">v0 (best quality, very slow)</option>
+      <option value="builtin">Built in (instant, no photos)</option>
+      <option value="none">No screens at all</option></select>
+    <button id="btnTestKeys">Test keys</button>
+  </div>
+  <div class="field"><p class="lab">Or import a UX Pilot PDF export</p>
+    <input type="file" id="pdfPick" accept="application/pdf"></div>
+  <div id="screenList"></div>
+</div><footer><button onclick="dlgScreens.close()">Close</button></footer></dialog>
+
+<dialog id="dlgQA"><h3>Proposal review</h3><div class="in">
+  <p class="lab">Everything found in this proposal. Tick what you want changed;
+    anything you leave unticked is left exactly as it is.</p>
+  <div id="qaList"></div>
+</div><footer>
+  <button onclick="dlgQA.close()">Close</button>
+  <button id="btnQAAll">Select all fixable</button>
+  <button class="primary" id="btnQAApply">Apply selected</button>
+</footer></dialog>
+
+<dialog id="dlgAdmin" style="width:min(940px,96vw)"><h3>Admin</h3>
+  <div class="in" id="adminBody"></div>
+  <footer><button onclick="dlgAdmin.close()">Close</button></footer></dialog>
+
+<dialog id="dlgCredits"><h3>API health</h3><div class="in" id="creditsBody"></div>
+  <footer><button onclick="dlgCredits.close()">Close</button></footer></dialog>
+
+<dialog id="dlgRewrite"><h3>Rewrite selection</h3><div class="in">
+  <p class="lab" id="rwPath"></p>
+  <div class="field"><input id="rwText" placeholder="Make it sharper and more specific"></div>
+  <p class="lab">Only the selected fragment is sent. Prices, client details and the page 14
+    legal statements are edited by hand.</p>
+</div><footer><button onclick="dlgRewrite.close()">Cancel</button>
+  <button class="primary" id="btnRunRewrite">Rewrite with AI</button></footer></dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const arr = v => Array.isArray(v) ? v : (v == null ? [] : [v]);
+const PT = 595.2, PTH = 841.92;
+const LOCKED = p => p.startsWith('meta') || p.startsWith('page12.total')
+  || p.startsWith('page14.cards') || p.endsWith('.amount');
+
+const api = async (url, body) => {
+  const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'},
+                             body: JSON.stringify(body)});
+  let j;
+  try { j = await r.json(); }
+  catch (e) { throw new Error('Server returned ' + r.status + ' with no JSON body.'); }
+  if (!r.ok) throw new Error(j.error || j.detail || ('Server returned ' + r.status));
+  return j;
+};
+
+let doc = null, page = 0, sel = null, zoom = 0.72, tab = 'content';
+let user = null, pid = null, signMode = 'login';
+let outline = [], textmap = [], qa = [], failures = [], redoStack = [], listView = null;
+
+const data = () => doc.versions[doc.versions.length-1].data;
+const stamp = () => new Date().toISOString().replace('T',' ').slice(0,16);
+const getAt = (o,p) => p.split('.').reduce((n,k)=>(n==null?n:n[/^\d+$/.test(k)?+k:k]), o);
+const setAt = (o,p,v) => { const k=p.split('.'); const last=k.pop();
+  const n=k.reduce((x,y)=>x[/^\d+$/.test(y)?+y:y], o); n[/^\d+$/.test(last)?+last:last]=v; };
+let saveTimer = null;
+function persist(note){
+  try { localStorage.setItem('proposal', JSON.stringify(doc)); } catch(e){}
+  if (!pid) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await api('/api/proposals/' + pid + '/save',
+                {data: data(), note: note || 'Edited', screens: doc.screens || {}});
+      doc.dirty = false;
+      $('#docState').textContent = 'Saved';
+      $('#dirtyDot').className = 'dot saved';
+    } catch (e) { /* keep the local copy; the next edit retries */ }
+  }, 900);
+}
+
+function newDoc(d, name){
+  doc = {name: name || (d && d.meta && d.meta.project_name) || 'Untitled proposal',
+         status:'draft', versions:[{n:1, at:stamp(), note:'Working draft', data:d}],
+         shares:[], notes:[], screens:{}, dirty:false};
+  page = 0; sel = null; redoStack = []; listView = null;
+  persist(); refreshAll();
+}
+function commit(mut, note){
+  const next = JSON.parse(JSON.stringify(data()));
+  mut(next);
+  doc.versions.push({n: doc.versions.length+1, at: stamp(), note, data: next});
+  doc.dirty = true; redoStack = [];
+  persist(); refreshAll();
+}
+// ---------------------------------------------------------------- progress
+let progStart = 0;
+function progress(step, detail, pct, etaSeconds){
+  $('#progress').style.display = '';
+  $('#progStep').textContent = step;
+  $('#progDetail').textContent = detail || '';
+  $('#progBar').style.width = Math.max(2, Math.min(100, pct)) + '%';
+  if (etaSeconds == null) { $('#progLeft').textContent = ''; return; }
+  const m = Math.floor(etaSeconds/60), s = Math.round(etaSeconds%60);
+  $('#progLeft').textContent = etaSeconds > 90
+    ? 'about ' + (m + (s > 30 ? 1 : 0)) + ' min left'
+    : 'about ' + Math.max(5, Math.round(etaSeconds/5)*5) + ' sec left';
+}
+function progressDone(msg){
+  $('#progress').style.display = 'none';
+  if (msg) toast(msg);
+}
+
+function toast(msg, kind){
+  $('#toastWrap').innerHTML = '';
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind === 'err' ? ' err' : '');
+  const s = document.createElement('span'); s.textContent = msg; t.append(s);
+  const x = document.createElement('button'); x.className='ghost'; x.textContent='×';
+  x.onclick = () => t.remove(); t.append(x);
+  $('#toastWrap').append(t);
+  if (kind !== 'err') setTimeout(() => t.remove(), 9000);
+}
+
+function drawRail(){
+  $('#pageCount').textContent = outline.length + ' pages';
+  const warn = qa.length + failures.length;
+  $('#railWarn').style.display = warn ? 'flex' : 'none';
+  if (warn) $('#railWarn').querySelector('span').textContent = warn;
+  const host = $('#pageList'); host.innerHTML = '';
+  outline.forEach(p => {
+    const el = document.createElement('div');
+    el.className = 'pagecard' + (p.index === page ? ' on' : '');
+    const n = document.createElement('span'); n.className='n'; n.textContent = p.index+1;
+    const th = document.createElement('img'); th.className='thumb';
+    if (doc.thumbs && doc.thumbs[p.index]) th.src = doc.thumbs[p.index];
+    const meta = document.createElement('div'); meta.className='meta';
+    meta.innerHTML = `<b></b><span></span>`;
+    meta.querySelector('b').textContent = p.name;
+    const cmts = (doc.notes || []).filter(n => n.page === p.index);
+    const openC = cmts.filter(n => !n.done).length;
+    meta.querySelector('span').textContent =
+      p.fields + ' editable field' + (p.fields === 1 ? '' : 's')
+      + (cmts.length ? '  \u00b7  ' + cmts.length + ' comment'
+                       + (cmts.length === 1 ? '' : 's')
+                       + (openC ? '' : ' (done)') : '');
+    if (openC) {
+      const dot = document.createElement('span');
+      dot.style.cssText = 'width:8px;height:8px;border-radius:50%;'
+        + 'background:var(--amber);flex:0 0 auto';
+      el.append(dot);
+    }
+    el.append(n, th, meta);
+    el.onclick = () => { page = p.index; sel = null; listView = null;
+                         drawRail(); refreshPreview(); };
+    host.append(el);
+  });
+}
+
+let previewTimer = null;
+const schedulePreview = () => { clearTimeout(previewTimer);
+  previewTimer = setTimeout(refreshPreview, 240); };
+
+async function refreshPreview(){
+  try {
+    const r = await api('/api/preview', {data: data(), page, scale: 1.6,
+                                         screens_data: doc.screens || {}});
+    $('#preview').src = r.png;
+    doc.thumbs = doc.thumbs || {}; doc.thumbs[page] = r.png;
+    paintZoom();
+    textmap = r.textmap || []; qa = r.qa || []; failures = r.failures || [];
+    buildOverlay(); drawPins(); drawChecks(); drawRail();
+    if (tab === 'content') drawContent();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function paintZoom(){
+  $('#zoomVal').textContent = Math.round(zoom*100) + '%';
+  $('#preview').style.width = Math.round(PT * zoom * 1.34) + 'px';
+  buildOverlay(); drawPins();
+}
+
+function buildOverlay(){
+  const host = $('#overlay'); host.innerHTML = '';
+  const img = $('#preview');
+  if (!img.clientWidth) { img.onload = buildOverlay; return; }
+  const sx = img.clientWidth / PT, sy = img.clientHeight / PTH;
+  textmap.forEach(t => {
+    const box = document.createElement('div');
+    box.className = 'hot' + (t.path === sel ? ' sel' : '');
+    box.style.left = (t.x * sx) + 'px';
+    box.style.top = ((PTH - t.y - t.size * 0.82) * sy) + 'px';
+    box.style.width = (t.w * sx) + 'px';
+    box.style.height = Math.max(t.h * sy, 12) + 'px';
+    box.title = t.label;
+    box.onclick = () => {
+      if (commenting) return openPopover({field: t});   // comment on this field
+      sel = t.path; listView = null; buildOverlay(); showTab('content');
+    };
+    host.append(box);
+  });
+}
+
+const specFor = p => textmap.find(t => t.path === p);
+
+function drawContent(){
+  const host = $('#tabContent'); host.innerHTML = '';
+  if (listView) return drawList(host);
+  if (!sel) {
+    host.innerHTML = '<p class="empty">Click any text on the page to edit it.</p>';
+    return drawActions(host);
+  }
+  const spec = specFor(sel) || {label: sel, limit: 0, lines: 2};
+  const value = getAt(data(), sel);
+  const locked = LOCKED(sel);
+
+  const card = document.createElement('div'); card.className = 'sel';
+  card.innerHTML = '<div class="k">Selected</div><b></b><code></code>';
+  card.querySelector('b').textContent = spec.label;
+  card.querySelector('code').textContent = sel;
+  host.append(card);
+
+  const f = document.createElement('div'); f.className = 'field';
+  f.innerHTML = '<p class="lab">Text</p>';
+  const ta = document.createElement('textarea');
+  ta.rows = Math.min(Math.max(spec.lines || 2, 2), 8);
+  ta.value = value == null ? '' : value;
+  ta.disabled = locked;
+  f.append(ta);
+  const meter = document.createElement('div'); meter.className='meter'; f.append(meter);
+  host.append(f);
+
+  const paint = () => {
+    const n = ta.value.length, lim = spec.limit || 0;
+    let cls = 'fit', word = 'Fits safely';
+    if (lim && n > lim) { cls = 'fit over'; word = 'Too long, type will shrink'; }
+    else if (lim && n > lim*0.88) { cls = 'fit tight'; word = 'Close to the limit'; }
+    meter.innerHTML = '';
+    const a = document.createElement('span');
+    a.textContent = n + (lim ? ' / ' + lim : '') + ' characters';
+    const b = document.createElement('span'); b.className = cls;
+    b.textContent = lim ? word : '';
+    meter.append(a, b);
+  };
+  paint(); ta.oninput = paint;
+  ta.onchange = () => { if (ta.value !== (value == null ? '' : value))
+    commit(d => setAt(d, sel, ta.value), 'edit ' + sel); };
+
+  const rw = document.createElement('button');
+  rw.className = 'primary'; rw.style.width = '100%';
+  rw.textContent = '✦ Rewrite with AI'; rw.disabled = locked;
+  rw.onclick = openRewrite; host.append(rw);
+
+  const note = document.createElement('div');
+  note.className = 'note' + (locked ? ' hand' : '');
+  note.innerHTML = locked
+    ? '<div><b>Edited by hand</b>Prices, client details and legal statements are typed, never rewritten by AI.</div>'
+    : '<div><b>Layout protected</b>Typography, spacing and brand colours stay locked while you edit.</div>';
+  host.append(note);
+
+  drawActions(host);
+}
+
+const LISTS = [
+  ['page3.surfaces', 'Connected surfaces', {title:'New surface', blurb:'', icon:'ic_home'}],
+  ['page4.cards', 'Differentiator cards', {title:'New card', body:'', icon:'ic_spark'}],
+  ['page10.stack', 'Technology stack', {title:'New item', body:'', icon:'ic_code'}],
+  ['page10.services', 'Integrations', {title:'New service', body:'', icon:'ic_cloud'}],
+  ['page12.rows', 'Milestones',
+   {title:'New milestone', duration:'1\u20132 wks', amount:0, desc:''}],
+];
+
+function drawActions(host){
+  const h = document.createElement('div'); h.className='sect';
+  h.textContent = 'Page actions'; host.append(h);
+  const checks = document.createElement('button'); checks.className='act';
+  const n = qa.length + failures.length;
+  checks.innerHTML = 'View layout checks';
+  const tag = document.createElement('span');
+  tag.className = 'tag' + (n ? ' warn' : '');
+  tag.textContent = n ? n : 'Clean'; checks.append(tag);
+  checks.onclick = () => showTab('checks'); host.append(checks);
+
+  LISTS.forEach(([path, label, tpl]) => {
+    const list = getAt(data(), path); if (!Array.isArray(list)) return;
+    const b = document.createElement('button'); b.className='act';
+    b.textContent = label;
+    const t = document.createElement('span'); t.className='tag off';
+    t.textContent = list.length; b.append(t);
+    b.onclick = () => { listView = [path, label, tpl]; drawContent(); };
+    host.append(b);
+  });
+
+  const cur = document.createElement('button'); cur.className='act';
+  cur.textContent = 'Currency';
+  const curTag = document.createElement('span'); curTag.className='tag off';
+  curTag.textContent = (data().meta || {}).currency || 'USD';
+  cur.append(curTag);
+  cur.onclick = async () => {
+    const j = await (await fetch('/api/currencies')).json();
+    const codes = (j.currencies || []).map(c => c.code);
+    const pick = prompt('Currency for the milestones and total:\n\n'
+      + (j.currencies || []).map(c => c.code + ' - ' + c.name).join('\n'),
+      (data().meta || {}).currency || 'USD');
+    if (!pick) return;
+    const code = pick.trim().toUpperCase();
+    if (!codes.includes(code)) return toast('Not a supported currency.', 'err');
+    commit(d => { d.meta.currency = code; }, 'currency set to ' + code);
+    toast('Milestones and total now shown in ' + code + '.');
+  };
+  host.append(cur);
+
+  const exp = document.createElement('button'); exp.className='act';
+  exp.textContent = 'Export current proposal';
+  exp.onclick = () => $('#btnPdf').click(); host.append(exp);
+}
+
+function drawList(host){
+  const [path, label, tpl] = listView;
+  const back = document.createElement('button'); back.className='ghost';
+  back.textContent = '\u2039 Back';
+  back.onclick = () => { listView = null; drawContent(); }; host.append(back);
+  const h = document.createElement('div'); h.className='sect'; h.textContent = label;
+  host.append(h);
+  const list = getAt(data(), path) || [];
+  list.forEach((item, i) => {
+    const wrap = document.createElement('div'); wrap.className='item';
+    const row = document.createElement('div'); row.className='row';
+    const strong = document.createElement('strong');
+    strong.textContent = (Array.isArray(item.title) ? item.title.join(' ')
+                                                    : item.title) || ('Item ' + (i+1));
+    row.append(strong);
+    const up = document.createElement('button'); up.className='ghost'; up.textContent='\u2191';
+    up.onclick = () => i>0 && commit(d=>{const a=getAt(d,path);a.splice(i-1,0,a.splice(i,1)[0]);},'reorder');
+    const dn = document.createElement('button'); dn.className='ghost'; dn.textContent='\u2193';
+    dn.onclick = () => i<list.length-1 && commit(d=>{const a=getAt(d,path);a.splice(i+1,0,a.splice(i,1)[0]);},'reorder');
+    const del = document.createElement('button'); del.className='ghost';
+    del.style.color='var(--red)'; del.textContent='Delete';
+    del.onclick = () => commit(d => getAt(d,path).splice(i,1), 'delete ' + path + '.' + i);
+    row.append(up, dn, del); wrap.append(row);
+    Object.keys(item).forEach(k => {
+      const v = item[k];
+      if (typeof v !== 'string' && typeof v !== 'number') return;
+      const fp = path + '.' + i + '.' + k;
+      const f = document.createElement('div'); f.className='field';
+      const lab = document.createElement('p'); lab.className='lab'; lab.textContent = k;
+      const inp = document.createElement('input'); inp.value = v;
+      inp.onchange = () => commit(d => setAt(d, fp,
+        typeof v === 'number' && /^-?\d+$/.test(inp.value) ? +inp.value : inp.value),
+        'edit ' + fp);
+      f.append(lab, inp); wrap.append(f);
+    });
+    host.append(wrap);
+  });
+  const add = document.createElement('button'); add.textContent='+ Add';
+  add.style.width='100%';
+  add.onclick = () => commit(d => getAt(d,path).push(JSON.parse(JSON.stringify(tpl))),
+                             'add to ' + path);
+  host.append(add);
+}
+
+function drawChecks(){
+  const host = $('#tabChecks'); host.innerHTML = '';
+  const all = failures.map(f => ({page:f.page, kind:'error', detail:f.error}))
+    .concat(qa.map(q => ({page:(q.page||0)+1, kind:q.kind, detail:q.detail})));
+  const n = all.length;
+  $('#checkText').textContent = n ? n + ' layout check' + (n>1?'s':'') : 'No layout checks';
+  $('#checkPill').className = 'checkspill' + (n ? ' warn' : '');
+  if (!n) { host.innerHTML = '<p class="empty">No layout issues found.</p>'; return; }
+  all.forEach(i => {
+    const el = document.createElement('div');
+    el.className = 'issue' + (i.kind === 'error' ? ' err' : '');
+    const b = document.createElement('b'); b.textContent = 'Page ' + i.page + ' \u00b7 ' + i.kind;
+    const s = document.createElement('span'); s.textContent = i.detail;
+    el.append(b, s); host.append(el);
+  });
+}
+
+function drawNotes(){
+  const host = $('#tabNotes'); host.innerHTML = '';
+  const notes = doc.notes || [];
+  const open = notes.filter(n => !n.done).length;
+  $('#noteCount').textContent = notes.length;
+
+  const help = document.createElement('p'); help.className = 'lab';
+  help.textContent = 'Click Comment in the toolbar, then click any text or drag '
+    + 'a box around an area. Comments stay attached to what you marked and never '
+    + 'print.';
+  host.append(help);
+
+  if (open > 1) {
+    const all = document.createElement('button');
+    all.className = 'primary'; all.style.width = '100%';
+    all.textContent = 'Ask the assistant to do all ' + open + ' open comments';
+    all.onclick = async () => {
+      for (let i = 0; i < doc.notes.length; i++)
+        if (!doc.notes[i].done) await runNote(i);
+    };
+    host.append(all);
+  }
+  if (!notes.length) {
+    host.insertAdjacentHTML('beforeend',
+      '<p class="empty">No comments yet.</p>');
+    return;
+  }
+
+  // grouped by page, so the sidebar is the whole proposal at a glance
+  const byPage = {};
+  notes.forEach((n, i) => (byPage[n.page] = byPage[n.page] || []).push([n, i]));
+  Object.keys(byPage).map(Number).sort((a, b) => a - b).forEach(pg => {
+    const h2 = document.createElement('div'); h2.className = 'sect';
+    h2.textContent = 'Page ' + (pg + 1) + ' \u00b7 '
+                   + ((outline[pg] || {}).name || '');
+    host.append(h2);
+    byPage[pg].forEach(([n, i]) => {
+      const el = document.createElement('div');
+      el.className = 'cmt' + (n.done ? ' done' : '');
+      el.id = 'cmt' + i;
+      const top = document.createElement('div'); top.className = 'top';
+      const num = document.createElement('span'); num.className = 'num';
+      num.textContent = i + 1;
+      const when = document.createElement('span');
+      when.style.marginRight = 'auto'; when.textContent = n.at;
+      const state = document.createElement('span');
+      state.textContent = n.done ? 'done' : 'open';
+      top.append(num, when, state);
+      const body = document.createElement('div');
+      body.className = 'body'; body.textContent = n.body;
+      const where = document.createElement('div'); where.className = 'where';
+      where.textContent = n.path ? ('on ' + (n.label || n.path))
+                                 : 'on a marked area';
+      el.append(top, body, where);
+
+      const go = document.createElement('button');
+      go.className = n.done ? 'ghost' : 'primary';
+      go.style.marginTop = '9px';
+      go.textContent = n.done ? 'Run again' : 'Ask the assistant to do this';
+      go.onclick = ev => { ev.stopPropagation(); runNote(i); };
+      const show = document.createElement('button');
+      show.className = 'ghost'; show.textContent = 'Show on page';
+      show.onclick = ev => { ev.stopPropagation(); page = n.page;
+                             drawRail(); refreshPreview(); };
+      const rm = document.createElement('button'); rm.className = 'ghost';
+      rm.style.color = 'var(--red)'; rm.textContent = 'Delete';
+      rm.onclick = ev => { ev.stopPropagation(); doc.notes.splice(i, 1);
+                           persist(); drawNotes(); drawPins(); };
+      el.append(go, show, rm);
+      el.onclick = () => { page = n.page; drawRail(); refreshPreview(); };
+      host.append(el);
+    });
+  });
+}
+
+function showTab(name){
+  tab = name;
+  document.querySelectorAll('.tabs button').forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === name));
+  $('#tabContent').style.display = name === 'content' ? '' : 'none';
+  $('#tabChecks').style.display  = name === 'checks'  ? '' : 'none';
+  $('#tabAgent').style.display   = name === 'agent'   ? '' : 'none';
+  $('#tabNotes').style.display   = name === 'notes'   ? '' : 'none';
+  if (name === 'content') drawContent();
+  if (name === 'checks') drawChecks();
+  if (name === 'agent') { drawIdeas(); drawAttached(); drawPrefs(); drawRules(); }
+  if (name === 'notes') drawNotes();
+}
+document.querySelectorAll('.tabs button').forEach(b =>
+  b.onclick = () => showTab(b.dataset.tab));
+
+function showBlank(on){
+  $('#blank').style.display = on ? 'block' : 'none';
+  $('#stagewrap').style.display = on ? 'none' : 'grid';
+  document.querySelectorAll('.toolbar button, header button')
+    .forEach(b => { if (!['btnNew','btnBlankNew','btnBlankList'].includes(b.id))
+                      b.disabled = on; });
+}
+$('#btnBlankNew').onclick = () => dlgNew.showModal();
+$('#btnBlankList').onclick = async () => {
+  $('#appShell').style.display = 'none';
+  $('#gate').style.display = 'grid';
+  await showList();
+};
+
+async function refreshAll(){
+  if (!doc || !doc.versions) { showBlank(true); return; }
+  showBlank(false);
+  $('#docName').textContent = doc.name;
+  $('#docState').textContent = doc.dirty ? 'Unsaved changes'
+    : (doc.status === 'sent' ? 'Published' : 'Working draft');
+  $('#dirtyDot').className = 'dot' + (doc.dirty ? '' : ' saved');
+  try {
+    const o = await api('/api/outline', {data: data()});
+    outline = o.pages; qa = o.qa; failures = o.failures;
+  } catch (e) { /* the preview still works without the outline */ }
+  drawRail(); showTab(tab); schedulePreview();
+}
+
+$('#zoomIn').onclick  = () => { zoom = Math.min(zoom+0.12, 1.6); paintZoom(); };
+$('#zoomOut').onclick = () => { zoom = Math.max(zoom-0.12, 0.4); paintZoom(); };
+$('#btnUndo').onclick = async () => {
+  if (pid) {
+    try { await api('/api/proposals/'+pid+'/undo', {}); await openProposal(pid);
+          return toast('Stepped back one version.'); }
+    catch (e) { return toast(e.message, 'err'); }
+  }
+  if (doc.versions.length < 2) return;
+  redoStack.push(doc.versions.pop()); refreshAll();
+};
+$('#btnRedo').onclick = () => { if (!redoStack.length) return;
+  doc.versions.push(redoStack.pop()); persist(); refreshAll(); };
+$('#btnSave').onclick = async () => {
+  if (!pid) return toast('This proposal is not saved to your account yet.', 'err');
+  try {
+    const j = await api('/api/proposals/' + pid + '/save',
+                        {data: data(), note: 'Saved by hand', screens: doc.screens||{}});
+    doc.dirty = false; refreshAll(); toast('Saved as version ' + j.version + '.');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('#btnPublish').onclick = async () => {
+  if (!pid) return toast('Save this proposal first.', 'err');
+  let v = doc.versions.length;
+  try { const j = await api('/api/proposals/' + pid + '/publish', {}); v = j.version; }
+  catch (e) { return toast(e.message, 'err'); }
+  doc.status = 'sent'; doc.dirty = false; refreshAll();
+  toast('Proposal published. The client link is pinned to v' + v +
+        '; you can keep editing without changing what they see.');
+};
+$('#btnNew').onclick = () => dlgNew.showModal();
+// currencies come from the server, so the list is never out of step
+fetch('/api/currencies').then(r => r.json()).then(j => {
+  const sel = $('#nCurrency');
+  sel.innerHTML = '';
+  (j.currencies || []).forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.code;
+    o.textContent = c.code + '  \u00b7  ' + c.name
+                  + (c.symbol && c.symbol !== c.code ? '  (' + c.symbol + ')' : '');
+    sel.append(o);
+  });
+  sel.value = 'USD';
+}).catch(()=>{});
+$('#nRegion').onchange = () => {
+  // a sensible default, still free to change
+  const want = $('#nRegion').value === 'UK' ? 'GBP' : 'USD';
+  if ($('#nCurrency').value !== want) $('#nCurrency').value = want;
+};
+
+// uploaded documents become the transcript
+$('#nTranscript').oninput = () => {
+  $('#nChars').textContent = $('#nTranscript').value.length + ' characters';
+};
+$('#nDoc').onchange = async () => {
+  const files = [...$('#nDoc').files];
+  if (!files.length) return;
+  const host = $('#docList');
+  for (const f of files) {
+    const row = document.createElement('div');
+    row.className = 'banner ok';
+    row.textContent = 'Reading ' + f.name + '\u2026';
+    host.append(row);
+    try {
+      const dataUrl = await new Promise((res, rej) => {
+        const rd = new FileReader();
+        rd.onload = () => res(rd.result);
+        rd.onerror = () => rej(new Error('Could not read that file.'));
+        rd.readAsDataURL(f);
+      });
+      const r = await api('/api/read-document', {filename: f.name, data: dataUrl});
+      const box = $('#nTranscript');
+      box.value = (box.value ? box.value.trimEnd() + '\n\n' : '')
+                + '--- ' + r.filename + ' ---\n' + r.text;
+      $('#nTranscript').oninput();
+      row.textContent = r.filename + ': ' + r.characters.toLocaleString()
+                      + ' characters added';
+    } catch (e) {
+      row.className = 'banner warn';
+      row.textContent = f.name + ': ' + e.message;
+    }
+  }
+  $('#nDoc').value = '';
+};
+
+$('#nMilestones').oninput = $('#nTotal').oninput = () => {
+  const ms = ($('#nMilestones').value||'').split(',').map(s=>+s.trim()).filter(n=>!isNaN(n));
+  const total = +$('#nTotal').value, box = $('#nSum');
+  if (!ms.length || !total) { box.innerHTML=''; return; }
+  const sum = ms.reduce((a,b)=>a+b,0);
+  box.innerHTML = sum === total
+    ? '<div class="banner ok">Milestones sum to ' + sum + ', matching the total.</div>'
+    : '<div class="banner warn">Milestones sum to ' + sum + ' but the total says ' + total
+      + ' (' + (sum>total?'over':'under') + ' by ' + Math.abs(sum-total)
+      + '). Adjust the middle milestones, never the first or last.</div>';
+};
+$('#btnGenerate').onclick = async () => {
+  const meta = {client_contact:$('#nContact').value, client_company:$('#nCompany').value,
+    project_name:$('#nProject').value, region:$('#nRegion').value,
+    currency:$('#nCurrency').value || 'USD',
+    signer_name:$('#nSigner').value, signer_role:$('#nRole').value,
+    date: new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})};
+  const milestones = ($('#nMilestones').value||'').split(',').map(s=>+s.trim()).filter(n=>!isNaN(n));
+  const total_value = +$('#nTotal').value, transcript = $('#nTranscript').value;
+  $('#btnGenerate').disabled = true;
+  dlgNew.close();
+  progStart = Date.now();
+  try {
+    progress('Reading the transcript',
+             'Working out what the product is, who uses it, and which screens it needs',
+             8, 55);
+    const b = await api('/api/brief', {transcript, meta});
+    progress('Writing the front pages',
+             'Cover, app overview and the differentiator, in the house voice',
+             38, 40);
+    const f = await api('/api/front', {brief: b.brief, meta});
+    progress('Laying out the features',
+             'Grouping features by interface, choosing the technical stack, '
+             + 'writing the milestone descriptions', 68, 30);
+    const r = await api('/api/features', {brief: b.brief, front: f.front, meta,
+                                          milestones, total_value});
+    progress('Building the pages', 'Drawing 15 pages at print resolution', 92, 6);
+    newDoc(r.data, meta.project_name);
+    try {
+      const created = await api('/api/proposals', {data: r.data});
+      pid = created.id;
+    } catch (e) { /* unsaved, but still editable */ }
+    progressDone('Proposal generated and saved to your account. '
+               + 'Review the layout checks, then add the UI screens.');
+    if ((r.warnings||[]).length) toast(r.warnings.join(' '), 'err');
+  } catch (e) { progressDone(); toast('Generate failed. ' + e.message, 'err');
+                dlgNew.showModal(); }
+  $('#btnGenerate').disabled = false;
+};
+
+function openRewrite(){
+  if (!sel || LOCKED(sel)) return;
+  $('#rwPath').textContent = ((specFor(sel)||{}).label || sel) + ' \u00b7 ' + sel;
+  $('#rwText').value = ''; dlgRewrite.showModal();
+}
+$('#btnRewrite').onclick = () => sel ? openRewrite()
+  : toast('Click a field on the page first.', 'err');
+$('#btnRunRewrite').onclick = async () => {
+  try {
+    const r = await api('/api/edit', {data: data(), path: sel,
+                                      instruction: $('#rwText').value});
+    dlgRewrite.close();
+    commit(d => r.ops.forEach(o => setAt(d, o.path, o.value)), 'rewrite ' + sel);
+    toast('Selection rewritten.');
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+// ------------------------------------------------------------ API health
+$('#btnCredits').onclick = async () => {
+  const host = $('#creditsBody');
+  host.innerHTML = '<p class="lab">Checking each service\u2026</p>';
+  dlgCredits.showModal();
+  try {
+    const r = await (await fetch('/api/credits')).json();
+    host.innerHTML = '';
+    const row = (name, ok, detail) => {
+      const el = document.createElement('div');
+      el.className = 'banner ' + (ok ? 'ok' : 'warn');
+      el.innerHTML = '<b></b><div style="margin-top:3px"></div>';
+      el.querySelector('b').textContent = name + ': ' + (ok ? 'OK' : 'problem');
+      el.querySelector('div').textContent = detail || '';
+      host.append(el);
+    };
+    row('Claude (writing)', r.anthropic.ok, r.anthropic.detail);
+    row('Screenshots (' + (r.screens.screenshot.provider || 'none') + ')',
+        r.screens.screenshot.ok, r.screens.screenshot.detail);
+    row('v0 (optional)', r.screens.v0.ok, r.screens.v0.detail);
+    const spend = document.createElement('p'); spend.className = 'lab';
+    spend.textContent = 'Spent so far: $' + (r.spend.total || 0).toFixed(2)
+      + ' \u00b7 average per proposal $'
+      + (r.spend.average_proposal || 0).toFixed(2);
+    host.append(spend);
+  } catch (e) { host.innerHTML = '<div class="banner warn">' + e.message + '</div>'; }
+};
+
+// ---------------------------------------------------------------- admin
+const money = n => '$' + (Number(n) || 0).toFixed(2);
+$('#btnAdmin').onclick = async () => {
+  const host = $('#adminBody');
+  host.innerHTML = '<p class="lab">Loading\u2026</p>';
+  dlgAdmin.showModal();
+  try {
+    const r = await (await fetch('/api/admin/overview')).json();
+    host.innerHTML = '';
+    const sect = t => { const d = document.createElement('div');
+      d.className = 'sect'; d.textContent = t; host.append(d); };
+    const table = (cols, rows) => {
+      const t = document.createElement('table');
+      t.style.cssText = 'width:100%;border-collapse:collapse;font-size:12.5px';
+      t.innerHTML = '<thead><tr>' + cols.map(c =>
+        '<th style="text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);'
+        + 'color:var(--muted);font-weight:600">' + c + '</th>').join('') + '</tr></thead>';
+      const b = document.createElement('tbody');
+      rows.forEach(cells => {
+        const tr = document.createElement('tr');
+        cells.forEach(v => { const td = document.createElement('td');
+          td.style.cssText = 'padding:7px 8px;border-bottom:1px solid var(--line)';
+          td.textContent = v; tr.append(td); });
+        b.append(tr);
+      });
+      t.append(b); host.append(t);
+    };
+
+    sect('System health');
+    const h2 = r.health;
+    table(['Check', 'Value'], [
+      ['Build', h2.build],
+      ['Page artwork', h2.assets ? 'all 15 present' : 'MISSING'],
+      ['Claude key', h2.anthropic_key_set ? 'set' : 'NOT SET'],
+      ['Writing model', h2.generate_model],
+      ['Fast screens', h2.fast_screens ? 'ready' : 'not configured'],
+      ['v0 screens', h2.v0_screens ? 'ready' : 'not configured'],
+      ['Screenshot provider', h2.screenshot_provider],
+      ['Photos in screens', h2.photo_source],
+      ['Sign-up limited to', (h2.allowed_domains || []).join(', ') || 'anyone'],
+      ['Database', (r.database || {}).backend + ((r.database || {}).reachable
+                    ? ', reachable' : ', NOT REACHABLE')],
+      ['Email for sign-up codes', r.mail_configured ? 'configured'
+                                                    : 'NOT configured'],
+    ]);
+
+    sect('Spend');
+    table(['Measure', 'Value'], [
+      ['Total spent', money(r.totals.cost)],
+      ['Average per proposal', money(r.average_proposal)],
+      ['Model calls', r.totals.calls || 0],
+      ['Tokens in / out', (r.totals.tin || 0) + ' / ' + (r.totals.tout || 0)],
+    ]);
+
+    sect('Spend by user');
+    table(['User', 'Proposals', 'Calls', 'Cost'],
+      (r.by_user || []).map(u => [u.email || 'unknown', u.proposals, u.calls,
+                                  money(u.cost)]));
+
+    sect('Spend by proposal');
+    table(['Proposal', 'Owner', 'Calls', 'Cost'],
+      (r.by_proposal || []).map(p => [p.name || p.id, p.email, p.calls,
+                                      money(p.cost)]));
+
+    sect('Where the money goes');
+    table(['Service', 'Provider', 'Calls', 'Cost'],
+      (r.by_kind || []).map(k => [k.kind, k.provider, k.calls, money(k.cost)]));
+
+    sect('People');
+    const people = document.createElement('div');
+    (r.users || []).forEach(u => {
+      const el = document.createElement('div'); el.className = 'item';
+      el.style.cssText += ';display:flex;gap:9px;align-items:center';
+      const s = document.createElement('span');
+      s.style.marginRight = 'auto'; s.style.fontSize = '13px';
+      s.textContent = u.email + '  \u00b7  ' + u.role
+                    + (u.disabled ? '  \u00b7  disabled' : '')
+                    + (u.last_seen ? '  \u00b7  last seen ' + u.last_seen : '');
+      const role = document.createElement('button');
+      role.textContent = u.role === 'admin' ? 'Make member' : 'Make admin';
+      role.onclick = async () => {
+        await fetch('/api/admin/user-role', {method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({user_id: u.id,
+                                role: u.role === 'admin' ? 'member' : 'admin'})});
+        $('#btnAdmin').click();
+      };
+      const off = document.createElement('button');
+      off.className = 'ghost'; off.style.color = 'var(--red)';
+      off.textContent = u.disabled ? 'Enable' : 'Disable';
+      off.onclick = async () => {
+        await fetch('/api/admin/user-disabled', {method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({user_id: u.id, disabled: !u.disabled})});
+        $('#btnAdmin').click();
+      };
+      el.append(s, role, off); people.append(el);
+    });
+    host.append(people);
+
+    sect('Activity by user');
+    table(['User', 'Actions', 'Last seen'],
+      (r.activity_by_user || []).map(u => [u.email || 'unknown', u.actions,
+                                           u.last_at]));
+
+    sect('What people have been doing');
+    table(['When', 'Who', 'Action', 'Detail'],
+      (r.activity || []).map(x => [x.at, x.email || '-', x.action,
+                                   (x.detail || '').slice(0, 70)]));
+
+    sect('Billable calls');
+    table(['When', 'What', 'Model', 'Stage', 'Cost'],
+      (r.recent || []).map(x => [x.at, x.kind, x.model || '-', x.stage || '-',
+                                 money(x.cost)]));
+
+    sect('What the system has learned');
+    table(['Rule', 'Applies to', 'Seen on'],
+      (r.rules || []).map(x => [x.text, x.field, x.seen + ' proposals']));
+  } catch (e) {
+    host.innerHTML = '<div class="banner warn">' + e.message + '</div>';
+  }
+};
+
+$('#btnVersions').onclick = async () => {
+  const host = $('#versionList'); host.innerHTML = '';
+  let list = doc.versions.slice().reverse(), entries = [];
+  if (pid) {
+    try {
+      list = (await (await fetch('/api/proposals/'+pid+'/versions')).json()).versions;
+      entries = (await (await fetch('/api/proposals/'+pid+'/log')).json()).log;
+    } catch (e) {}
+  }
+  if (entries.length) {
+    const h2 = document.createElement('div'); h2.className='sect';
+    h2.textContent = 'Change log'; host.append(h2);
+    entries.slice(0, 12).forEach(e => {
+      const el = document.createElement('div'); el.className='issue';
+      const b = document.createElement('b');
+      b.textContent = 'v' + e.version + ' \u00b7 ' + e.at + ' \u00b7 ' + (e.author || '');
+      const s = document.createElement('span'); s.textContent = e.action + ' \u2014 ' + e.detail;
+      el.append(b, s); host.append(el);
+    });
+    const h3 = document.createElement('div'); h3.className='sect';
+    h3.textContent = 'Versions'; host.append(h3);
+  }
+  list.forEach(v => {
+    const row = document.createElement('div'); row.className='vrow';
+    const n = document.createElement('span'); n.className='n'; n.textContent='v'+v.n;
+    const m = document.createElement('span'); m.className='m';
+    m.textContent = v.at + ' \u00b7 ' + (v.note || '') +
+      (v.author ? ' \u00b7 ' + v.author : '');
+    const b = document.createElement('button'); b.textContent='Restore';
+    b.onclick = async () => {
+      if (pid) { await api('/api/proposals/'+pid+'/restore/'+v.n, {}); await openProposal(pid); }
+      else commit(d => Object.assign(d, JSON.parse(JSON.stringify(v.data))), 'restored v'+v.n);
+      dlgVersions.close();
+    };
+    row.append(n, m, b); host.append(row);
+  });
+  dlgVersions.showModal();
+};
+
+$('#btnPdf').onclick = async () => {
+  toast('Building the PDF\u2026');
+  try {
+    const r = await api('/api/render', {data: data(), screens_data: doc.screens || {}});
+    const a = document.createElement('a');
+    a.href = 'data:application/pdf;base64,' + r.pdf; a.download = r.filename; a.click();
+    if (!r.milestones_ok) toast(r.milestone_warning, 'err'); else toast('PDF exported.');
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+function screenSlots(){
+  const D = data(), out = [];
+  (D.core_pages||[]).forEach((cp,i) => {
+    if (cp.kind === 'grid')
+      (cp.cards||[]).forEach((card,j) => out.push({
+        id: card.screen || ('p'+cp.template+'_c'+j),
+        label: 'Page ' + cp.template + ' \u00b7 ' + arr(card.title).join(' '),
+        set: v => setAt(data(), 'core_pages.'+i+'.cards.'+j+'.screen', v)}));
+    else if (cp.kind === 'device')
+      out.push({id: cp.screen || ('p'+cp.template+'_device'),
+        label: 'Page ' + cp.template + ' \u00b7 ' + arr(cp.headline).join(' '),
+        set: v => setAt(data(), 'core_pages.'+i+'.screen', v)});
+  });
+  if (D.page9 && D.page9.include)
+    out.push({id: D.page9.screen || 'p9_phone', label: 'Page 9 \u00b7 Marketing engine',
+              set: v => setAt(data(), 'page9.screen', v)});
+  return out;
+}
+let qaItems = [];
+$('#btnQA').onclick = async () => {
+  progress('Reviewing the proposal',
+           'Checking the client details, the money, the copy lengths and every '
+           + 'card and page for design problems', 30, 20);
+  try {
+    const r = await api('/api/qa-review', {data: data()});
+    progressDone();
+    qaItems = r.items || [];
+    const host = $('#qaList'); host.innerHTML = '';
+    if (!qaItems.length) {
+      host.innerHTML = '<div class="banner ok">Nothing found. '
+        + 'The proposal is clean.</div>';
+    } else {
+      const groups = {content: 'Content', money: 'Money', design: 'Design'};
+      Object.keys(groups).forEach(kind => {
+        const rows = qaItems.filter(i => i.kind === kind);
+        if (!rows.length) return;
+        const h2 = document.createElement('div'); h2.className = 'sect';
+        h2.textContent = groups[kind]; host.append(h2);
+        rows.forEach(i => {
+          const el = document.createElement('label');
+          el.className = 'item';
+          el.style.cssText += ';display:flex;gap:10px;align-items:flex-start;cursor:pointer';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.value = i.id; cb.disabled = !i.fixable;
+          cb.style.cssText = 'width:auto;margin-top:3px';
+          const txt = document.createElement('div');
+          txt.innerHTML = '<b style="font-size:13px"></b>'
+            + '<div style="font-size:12.5px;color:var(--muted);margin-top:2px"></div>';
+          txt.querySelector('b').textContent = i.title;
+          txt.querySelector('div').textContent = i.detail
+            + (i.fixable ? '' : '  \u2014 fix this by hand');
+          const tag = document.createElement('span');
+          tag.className = 'tag' + (i.severity === 'error' ? ' warn' : ' off');
+          tag.textContent = i.severity === 'error' ? 'must fix' : 'should fix';
+          tag.style.marginLeft = 'auto';
+          el.append(cb, txt, tag); host.append(el);
+        });
+      });
+    }
+    dlgQA.showModal();
+  } catch (e) { progressDone(); toast(e.message, 'err'); }
+};
+$('#btnQAAll').onclick = () =>
+  document.querySelectorAll('#qaList input[type=checkbox]:not(:disabled)')
+    .forEach(c => c.checked = true);
+$('#btnQAApply').onclick = async () => {
+  const ids = [...document.querySelectorAll('#qaList input:checked')].map(c => c.value);
+  if (!ids.length) return toast('Nothing selected.', 'err');
+  progress('Applying the fixes', ids.length + ' change(s)', 50, 12);
+  try {
+    const r = await api('/api/qa-apply', {data: data(), items: qaItems, ids});
+    progressDone();
+    dlgQA.close();
+    commit(d => Object.assign(d, r.data), 'QA: ' + r.applied.length + ' fix(es)');
+    toast('Applied: ' + r.applied.join('; '));
+  } catch (e) { progressDone(); toast(e.message, 'err'); }
+};
+
+$('#btnScreens').onclick = () => { drawScreenList(); dlgScreens.showModal(); };
+function drawScreenList(){
+  const host = $('#screenList'); host.innerHTML = '';
+  screenSlots().forEach(slot => {
+    const has = !!(doc.screens && doc.screens[slot.id]);
+    const wrap = document.createElement('div'); wrap.className='item';
+    const row = document.createElement('div'); row.className='row';
+    const s = document.createElement('strong'); s.textContent = slot.label;
+    const t = document.createElement('span'); t.className = 'tag' + (has ? '' : ' off');
+    t.textContent = has ? 'attached' : 'empty';
+    row.append(s, t); wrap.append(row);
+    const file = document.createElement('input');
+    file.type='file'; file.accept='image/png,image/jpeg';
+    file.onchange = () => { const f = file.files[0]; if(!f) return;
+      const rd = new FileReader();
+      rd.onload = () => { doc.screens = doc.screens||{}; doc.screens[slot.id]=rd.result;
+        slot.set(slot.id); persist(); drawScreenList(); schedulePreview(); };
+      rd.readAsDataURL(f); };
+    wrap.append(file);
+    if (has) { const img=document.createElement('img'); img.src=doc.screens[slot.id];
+      img.style.cssText='max-height:110px;margin-top:8px;border-radius:8px;display:block';
+      wrap.append(img);
+      const again = document.createElement('button'); again.className='ghost';
+      again.textContent='Replace just this one';
+      again.onclick = () => { delete doc.screens[slot.id]; persist();
+                              runScreens(false, 'missing'); };
+      wrap.append(again);
+    } else {
+      const one = document.createElement('button'); one.className='ghost';
+      one.textContent='Generate just this one';
+      one.onclick = async () => {
+        progress('Building one screen', slot.label, 45, 70);
+        try {
+          const r = await api('/api/auto-screens', {data: data(), brief: {},
+                              engine: $('#screenEngine').value,
+                              slot_ids: [slot.id]});
+          progressDone();
+          doc.screens = Object.assign(doc.screens||{}, r.screens||{});
+          doc.screen_sources = Object.assign(doc.screen_sources||{}, r.sources||{});
+          if ((r.screens||{})[slot.id]) slot.set(slot.id);
+          persist(); drawScreenList(); schedulePreview();
+          toast((r.errors||[]).length ? r.errors[0] : 'Screen added.',
+                (r.errors||[]).length ? 'err' : undefined);
+        } catch (e) { progressDone(); toast(e.message, 'err'); }
+      };
+      wrap.append(one);
+    }
+    host.append(wrap);
+  });
+  if (!host.children.length)
+    host.innerHTML = '<p class="empty">Generate a proposal first.</p>';
+}
+async function runScreens(only, mode){
+  const engine = $('#screenEngine').value;
+  const have = Object.keys(doc.screens || {})
+                     .filter(k => screenSlots().some(s => s.id === k));
+
+  if (engine === 'none') {           // strip every mockup from the proposal
+    commit(d => { d.no_screens = true; }, 'removed the UI mockups');
+    doc.screens = {}; persist(); drawScreenList();
+    return toast('Mockups removed. The feature text now fills the space.');
+  }
+  if (data().no_screens) commit(d => { d.no_screens = false; }, 'mockups back on');
+
+  let slots = [];
+  try { slots = (await api('/api/screen-slots', {data: data()})).slots; }
+  catch (e) { return toast(e.message, 'err'); }
+  if (!slots.length) return toast('No screen slots in this proposal.', 'err');
+  if (mode === 'missing') {
+    slots = slots.filter(s => !(doc.screens || {})[s.id]);
+    if (!slots.length)
+      return toast('Every slot already has a screen. Use Regenerate all to '
+                 + 'replace them.');
+  }
+  if (only) slots = slots.slice(0, 1);
+
+  if (engine !== 'builtin') {
+    const viaV0 = engine === 'v0';
+    progress(viaV0 ? 'Building the UI screens with v0'
+                   : 'Designing the UI screens',
+             viaV0
+               ? 'v0 builds a project and boots a sandbox, which can take '
+                 + 'tens of minutes for ' + slots.length + ' screens.'
+               : 'Writing all ' + slots.length + ' screens, rendering them once '
+                 + 'and cutting each one out. About a minute.',
+             25, viaV0 ? 1500 : 70);
+    try {
+      const r = await api('/api/auto-screens', {data: data(), brief: {}, engine,
+                          slot_ids: slots.map(s => s.id)});
+      doc.screen_sources = Object.assign(doc.screen_sources || {},
+                                         r.sources || {});
+      progressDone();
+      if ((r.errors||[]).length && !r.count)
+        return toast('v0 failed: ' + r.errors[0], 'err');
+      doc.screens = Object.assign(doc.screens||{}, r.screens||{});
+      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
+      persist(); drawScreenList(); schedulePreview();
+      return toast(r.count + ' screens attached'
+                 + (r.batched ? ' from a single v0 build.' : '.'));
+    } catch (e) { progressDone(); return toast(e.message, 'err'); }
+  }
+
+  // the built-in renderer is fast, so it runs one at a time with real progress
+  const perScreen = 4;
+  const started = Date.now();
+  const failures = [];
+  doc.screens = doc.screens || {};
+  for (let i = 0; i < slots.length; i++) {
+    const elapsed = (Date.now() - started) / 1000;
+    const rate = i ? elapsed / i : perScreen;
+    progress('Building the UI screens',
+             'Screen ' + (i+1) + ' of ' + slots.length + ' \u00b7 ' + slots[i].title,
+             (i / slots.length) * 100, Math.round(rate * (slots.length - i)));
+    try {
+      const r = await api('/api/auto-screens', {data: data(), brief: {},
+                          engine, slot_ids: [slots[i].id]});
+      doc.screen_sources = Object.assign(doc.screen_sources || {},
+                                         r.sources || {});
+      if ((r.errors||[]).length) failures.push(...r.errors);
+      Object.assign(doc.screens, r.screens || {});
+      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
+      persist(); drawScreenList(); schedulePreview();
+    } catch (e) { failures.push(slots[i].id + ': ' + e.message); }
+  }
+  progressDone();
+  const made = Object.keys(doc.screens).length;
+  if (failures.length)
+    toast(failures.length + ' screen(s) failed. ' + failures[0], 'err');
+  else toast(made + ' screen' + (made>1?'s':'') + ' attached.');
+}
+$('#btnAutoScreens').onclick = () => {
+  if (Object.keys(doc.screens || {}).length &&
+      !confirm('This replaces every screen, including the ones already there. '
+             + 'Use "Fill missing screens" to keep them.')) return;
+  runScreens(false, 'all');
+};
+$('#btnFillMissing').onclick = () => runScreens(false, 'missing');
+$('#btnOneScreen').onclick = () => runScreens(true, 'missing');
+
+$('#btnRecover').onclick = async () => {
+  // slots we have a build URL for but no image: photograph them again, free
+  const missing = screenSlots().filter(s => !(doc.screens||{})[s.id]);
+  const known = {};
+  missing.forEach(s => {
+    const src = (doc.screen_sources || {})[s.id];
+    if (src && src.url) known[s.id] = src;
+  });
+  if (Object.keys(known).length) {
+    progress('Fetching screens already built',
+             'Photographing ' + Object.keys(known).length + ' build(s) again. '
+             + 'No rebuild, no credits.', 40, 25);
+    try {
+      const r = await api('/api/screens-recover', {sources: known});
+      progressDone();
+      doc.screens = Object.assign(doc.screens || {}, r.screens || {});
+      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
+      persist(); drawScreenList(); schedulePreview();
+      if (r.count) return toast(r.count + ' screen(s) recovered without rebuilding.');
+    } catch (e) { progressDone(); }
+  }
+  // otherwise offer whatever is sitting in the v0 account
+  try {
+    const r = await (await fetch('/api/v0-chats')).json();
+    const chats = (r.chats || []).filter(x => x.url);
+    if (!chats.length)
+      return toast('Nothing in v0 to reclaim. Use Fill missing screens.', 'err');
+    const which = prompt('Builds in your v0 account:\n\n'
+      + chats.map((x, i) => (i+1) + '. ' + (x.name || x.id)).join('\n')
+      + '\n\nWhich number should fill "' + (missing[0] || {}).label + '"?');
+    const pick = chats[parseInt(which, 10) - 1];
+    if (!pick || !missing.length) return;
+    progress('Fetching that build', pick.name || pick.id, 50, 20);
+    const got = await api('/api/screens-recover',
+      {sources: {[missing[0].id]: {url: pick.url, device: 'phone'}}});
+    progressDone();
+    doc.screens = Object.assign(doc.screens || {}, got.screens || {});
+    missing[0].set(missing[0].id);
+    persist(); drawScreenList(); schedulePreview();
+    toast('Screen fetched from v0.');
+  } catch (e) { progressDone(); toast(e.message, 'err'); }
+};
+$('#btnTestKeys').onclick = async () => {
+  try {
+    const r = await (await fetch('/api/test-keys')).json();
+    alert('v0: ' + (r.v0.ok?'OK':'FAILED') + '\n' + r.v0.detail +
+          '\n\nScreenshots (' + r.screenshot.provider + '): ' +
+          (r.screenshot.ok?'OK':'FAILED') + '\n' + r.screenshot.detail);
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('#pdfPick').onchange = () => {
+  const f = $('#pdfPick').files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = async () => {
+    toast('Splitting the PDF\u2026');
+    try {
+      const r = await api('/api/screens-from-pdf', {pdf: rd.result, scale: 2});
+      const slots = screenSlots(); doc.screens = doc.screens || {};
+      r.screens.forEach((s, i) => { if (slots[i]) { doc.screens[slots[i].id] = s.png;
+                                                    slots[i].set(slots[i].id); } });
+      persist(); drawScreenList(); schedulePreview();
+      toast(r.screens.length + ' screens imported and assigned in order.');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  rd.readAsDataURL(f);
+};
+
+// ----------------------------------------------------------- annotations
+let commenting = false, dragFrom = null;
+
+$('#btnComment').onclick = () => {
+  if (!doc || !doc.versions) return toast('Open a proposal first.', 'err');
+  commenting = !commenting;
+  $('#stage').classList.toggle('commenting', commenting);
+  $('#btnComment').classList.toggle('primary', commenting);
+  toast(commenting
+    ? 'Drag a box around the part you want changed, then type what you want.'
+    : 'Comment mode off.');
+};
+
+function pageScale(){
+  const img = $('#preview');
+  return {sx: img.clientWidth / PT, sy: img.clientHeight / PTH};
+}
+
+$('#stage').addEventListener('mousedown', e => {
+  if (!commenting) return;
+  const r = $('#stage').getBoundingClientRect();
+  dragFrom = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const b = $('#drawbox');
+  b.style.display = 'block';
+  b.style.left = dragFrom.x + 'px'; b.style.top = dragFrom.y + 'px';
+  b.style.width = '0px'; b.style.height = '0px';
+  e.preventDefault();
+});
+$('#stage').addEventListener('mousemove', e => {
+  if (!dragFrom) return;
+  const r = $('#stage').getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const b = $('#drawbox');
+  b.style.left = Math.min(x, dragFrom.x) + 'px';
+  b.style.top = Math.min(y, dragFrom.y) + 'px';
+  b.style.width = Math.abs(x - dragFrom.x) + 'px';
+  b.style.height = Math.abs(y - dragFrom.y) + 'px';
+});
+$('#stage').addEventListener('mouseup', e => {
+  if (!dragFrom) return;
+  const r = $('#stage').getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const box = {x: Math.min(x, dragFrom.x), y: Math.min(y, dragFrom.y),
+               w: Math.abs(x - dragFrom.x), h: Math.abs(y - dragFrom.y)};
+  dragFrom = null; $('#drawbox').style.display = 'none';
+  if (box.w < 12 || box.h < 12) return;      // a stray click, not a box
+  const {sx, sy} = pageScale();
+  openPopover({region: {x: box.x/sx, y: PTH - (box.y + box.h)/sy,
+                        w: box.w/sx, h: box.h/sy},
+               at: {left: box.x + box.w + 12, top: box.y}});
+});
+
+// ---- the comment box, anchored to what was marked ------------------------
+let popTarget = null;
+function openPopover(target){
+  popTarget = target;
+  const p = $('#popover');
+  const {sx, sy} = pageScale();
+  let left, top, where;
+  if (target.field) {
+    const t = target.field;
+    left = (t.x + t.w) * sx + 12;
+    top = (PTH - t.y - t.size * 0.82) * sy;
+    where = 'On "' + t.label + '"';
+  } else {
+    left = target.at.left; top = target.at.top;
+    where = 'On the marked area, page ' + (page + 1);
+  }
+  const stage = $('#stage').getBoundingClientRect();
+  p.style.left = Math.min(left, stage.width - 290) + 'px';
+  p.style.top = Math.max(top, 4) + 'px';
+  $('#popWhere').textContent = where;
+  $('#popText').value = '';
+  p.style.display = 'block';
+  $('#popText').focus();
+}
+function closePopover(){ $('#popover').style.display = 'none'; popTarget = null; }
+$('#popCancel').onclick = closePopover;
+$('#popText').onkeydown = e => {
+  if (e.key === 'Escape') closePopover();
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#popSave').click();
+};
+$('#popSave').onclick = async () => {
+  const body = $('#popText').value.trim();
+  if (!body || !popTarget) return closePopover();
+  const runNow = $('#popNow').checked;
+  const note = {page, at: stamp(), body, done: false};
+  if (popTarget.field) {
+    const t = popTarget.field;
+    note.path = t.path; note.label = t.label;
+    note.region = {x: t.x, y: t.y - t.h, w: t.w, h: Math.max(t.h, 12)};
+  } else {
+    note.region = popTarget.region;
+  }
+  doc.notes = doc.notes || [];
+  doc.notes.push(note);
+  persist(); closePopover(); drawPins(); drawNotes(); showTab('notes');
+  if (runNow) await runNote(doc.notes.length - 1);
+};
+
+function fieldsUnder(note){
+  // a comment made on a field stays bound to that field, whatever moves
+  if (note.path) {
+    const t = textmap.find(x => x.path === note.path);
+    return [{path: note.path, label: note.label || note.path,
+             limit: t ? t.limit : 0, text: getAt(data(), note.path)}];
+  }
+  const r = note.region;
+  return textmap.filter(t => t.page === note.page)
+    .filter(t => !(t.x > r.x + r.w || t.x + t.w < r.x ||
+                   (t.y - t.h) > r.y + r.h || t.y < r.y))
+    .slice(0, 6)
+    .map(t => ({path: t.path, label: t.label, limit: t.limit,
+                text: getAt(data(), t.path)}));
+}
+
+function drawPins(){
+  const host = $('#pins'); host.innerHTML = '';
+  const {sx, sy} = pageScale();
+  (doc.notes || []).forEach((n, i) => {
+    if (n.page !== page || !n.region) return;
+    const el = document.createElement('div');
+    el.className = 'pin' + (n.done ? ' done' : '');
+    el.style.left = (n.region.x * sx) + 'px';
+    el.style.top = ((PTH - n.region.y - n.region.h) * sy) + 'px';
+    el.style.width = (n.region.w * sx) + 'px';
+    el.style.height = (n.region.h * sy) + 'px';
+    const b = document.createElement('b'); b.textContent = i + 1;
+    const flag = document.createElement('span'); flag.className = 'flag';
+    el.append(b, flag);
+    el.title = n.body;
+    el.onclick = ev => { ev.stopPropagation(); showTab('notes');
+                         const row = document.getElementById('cmt' + i);
+                         if (row) row.scrollIntoView({block: 'center'}); };
+    host.append(el);
+  });
+}
+
+async function runNote(i){
+  const n = doc.notes[i];
+  const fields = fieldsUnder(n);
+  const ctx = {page_number: n.page + 1,
+               page_title: (outline[n.page] || {}).name || '',
+               page_key: (outline[n.page] || {}).key || '',
+               region: n.region,               // in PDF points, for artwork repairs
+               fields,
+               marked_text_only: fields.length > 0,
+               note: fields.length
+                 ? 'The mark covers text fields, so this is probably a wording change.'
+                 : 'The mark covers no text, so this is probably about the '
+                   + 'artwork: use clean_area on this region.'};
+  progress('The assistant is working',
+           'On your comment: "' + n.body.slice(0, 60) + '"', 40, 20);
+  try {
+    const r = await api('/api/chat', {data: data(), instruction: n.body,
+                                      context: ctx});
+    progressDone();
+    if (!r.applied) return toast(r.note || 'Nothing was changed.', 'err');
+    n.done = true;
+    commit(d => Object.assign(d, r.data), 'comment: ' + n.body.slice(0, 50));
+    toast(r.note || 'Change applied.');
+  } catch (e) { progressDone(); toast(e.message, 'err'); }
+}
+
+window.addEventListener('resize', buildOverlay);
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); e.shiftKey ? $('#btnRedo').click() : $('#btnUndo').click();
+  }
+});
+
+// ------------------------------------------------------------- accounts
+const authApi = async (url, body) => {
+  const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'},
+                             body: JSON.stringify(body || {})});
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.detail || j.error || 'Request failed');
+  return j;
+};
+// tell people the rules before they hit them
+fetch('/api/auth/me').then(r => r.json()).then(j => {
+  const doms = (j.allowed_domains || []).map(d => '@' + d).join(' or ');
+  if (doms) $('#signSub').textContent =
+    'Use your ' + doms + ' address. Passwords need 10 characters or more.'
+    + (j.accounts ? '' : ' The first account becomes the administrator.');
+}).catch(()=>{});
+
+function authMsg(text, ok){
+  $('#authMsg').innerHTML = '';
+  if (!text) return;
+  const d = document.createElement('div');
+  d.className = 'banner ' + (ok ? 'ok' : 'warn'); d.textContent = text;
+  $('#authMsg').append(d);
+}
+$('#toggleAuth').onclick = e => {
+  e.preventDefault();
+  signMode = signMode === 'login' ? 'signup' : 'login';
+  $('#signTitle').textContent = signMode === 'login' ? 'Sign in' : 'Create an account';
+  $('#btnAuth').textContent   = signMode === 'login' ? 'Sign in' : 'Create account';
+  $('#nameField').style.display = signMode === 'login' ? 'none' : '';
+  $('#codeStep').style.display = 'none';
+  $('#btnAuth').style.display = '';
+  $('#toggleAuth').textContent = signMode === 'login'
+    ? 'Create an account instead' : 'I already have an account';
+  authMsg('');
+};
+$('#btnAuth').onclick = async () => {
+  authMsg('');
+  const email = $('#aEmail').value.trim();
+  try {
+    const j = await authApi('/api/auth/' + signMode,
+      {email, password: $('#aPass').value, name: $('#aName').value});
+    if (j.pending) {                    // signup waits for the emailed code
+      $('#codeStep').style.display = '';
+      $('#btnAuth').style.display = 'none';
+      $('#toggleAuth').parentElement.style.display = 'none';
+      authMsg(j.note, true);
+      $('#aCode').focus();
+      return;
+    }
+    user = j.user; applyUser(); await showList();
+  } catch (e) { authMsg(e.message); }
+};
+$('#btnVerify').onclick = async () => {
+  authMsg('');
+  try {
+    const j = await authApi('/api/auth/verify',
+      {email: $('#aEmail').value.trim(), code: $('#aCode').value.trim()});
+    user = j.user; applyUser(); await showList();
+  } catch (e) { authMsg(e.message); }
+};
+$('#aCode').onkeydown = e => { if (e.key === 'Enter') $('#btnVerify').click(); };
+$('#resendCode').onclick = async e => {
+  e.preventDefault(); authMsg('');
+  try {
+    const j = await authApi('/api/auth/signup',
+      {email: $('#aEmail').value.trim(), password: $('#aPass').value,
+       name: $('#aName').value});
+    authMsg(j.note, true);
+  } catch (err) { authMsg(err.message); }
+};
+$('#btnSignOut').onclick = async () => {
+  await authApi('/api/auth/logout'); user = null; pid = null;
+  $('#appShell').style.display = 'none';
+  $('#gate').style.display = 'grid';
+  $('#listBox').style.display = 'none'; $('#signBox').style.display = '';
+};
+
+async function showList(){
+  $('#signBox').style.display = 'none';
+  $('#listBox').style.display = '';
+  const j = await api('/api/proposals', {}).catch(async () => {
+    const r = await fetch('/api/proposals'); return r.json(); });
+  const rows = j.proposals || [];
+  $('#listCount').textContent = rows.length
+    ? rows.length + (rows.length === 1 ? ' proposal' : ' proposals') : 'None yet';
+  const host = $('#proposalList'); host.innerHTML = '';
+  rows.forEach(p => {
+    const el = document.createElement('div');
+    el.style.cssText = 'display:flex;gap:12px;align-items:center;padding:12px 20px;'
+      + 'border-bottom:1px solid var(--line);cursor:pointer';
+    const meta = document.createElement('div');
+    meta.style.marginRight = 'auto';
+    meta.innerHTML = '<b style="display:block;font-size:14px"></b>'
+      + '<span style="font-size:12px;color:var(--muted)"></span>';
+    meta.querySelector('b').textContent = p.name;
+    meta.querySelector('span').textContent =
+      'v' + (p.versions || 1) + ' \u00b7 updated ' + p.updated
+      + (p.status === 'sent' ? ' \u00b7 published' : '')
+      + (p.copied_from ? ' \u00b7 duplicate' : '');
+    el.append(meta);
+    const open = document.createElement('button'); open.className = 'primary';
+    open.textContent = 'Open';
+    open.onclick = () => openProposal(p.id);
+    const dup = document.createElement('button'); dup.textContent = 'Duplicate';
+    dup.title = 'Copy this proposal and edit the copy';
+    dup.onclick = async (ev) => { ev.stopPropagation();
+      const j2 = await api('/api/proposals/' + p.id + '/duplicate', {name: ''});
+      openProposal(j2.id); };
+    const del = document.createElement('button'); del.className = 'ghost';
+    del.style.color = 'var(--red)'; del.textContent = 'Delete';
+    del.onclick = async (ev) => { ev.stopPropagation();
+      if (!confirm('Delete "' + p.name + '"? This cannot be undone.')) return;
+      await fetch('/api/proposals/' + p.id, {method:'DELETE'}); showList(); };
+    el.append(open, dup, del);
+    el.onclick = () => openProposal(p.id);
+    host.append(el);
+  });
+  if (!rows.length)
+    host.innerHTML = '<p class="empty" style="padding:26px">'
+      + 'No proposals yet. Start one from a call transcript.</p>';
+}
+
+async function openProposal(id){
+  const j = await (await fetch('/api/proposals/' + id)).json();
+  pid = id;
+  doc = {name: j.proposal.name, status: j.proposal.status,
+         versions: [{n: j.version, at: j.proposal.updated, note: 'Loaded',
+                     data: j.data}],
+         shares: [], notes: [], screens: j.screens || {}, dirty: false};
+  page = 0; sel = null; listView = null; redoStack = [];
+  $('#gate').style.display = 'none';
+  $('#appShell').style.display = 'grid';
+  refreshAll();
+}
+$('#btnNewFromList').onclick = () => {
+  $('#gate').style.display = 'none';
+  $('#appShell').style.display = 'grid';
+  showBlank(true);              // nothing to draw until it is generated
+  dlgNew.showModal();
+};
+
+// -------------------------------------------------------------- assistant
+const IDEAS = ['Delete the UI screens from the whole proposal',
+               'Add a page about security and compliance',
+               'Remove the marketing page',
+               'Make the differentiator sharper',
+               'Add an integration for calendar sync',
+               'Shorten the app overview'];
+function drawIdeas(){
+  const host = $('#chatIdeas'); host.innerHTML = '';
+  IDEAS.forEach(t => {
+    const b = document.createElement('button'); b.className = 'act';
+    b.textContent = t;
+    b.onclick = () => { $('#chatText').value = t; $('#btnChat').click(); };
+    host.append(b);
+  });
+}
+function chatSay(who, text, kind){
+  const el = document.createElement('div');
+  el.className = 'issue' + (kind === 'err' ? ' err' : '');
+  const b = document.createElement('b'); b.textContent = who;
+  const s = document.createElement('span'); s.textContent = text;
+  el.append(b, s); $('#chatLog').append(el);
+  el.scrollIntoView({block:'nearest'});
+}
+// images attached in the chat, ready for the assistant to place
+let chatImages = {};
+$('#chatImage').onchange = () => {
+  const f = $('#chatImage').files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const id = 'img_' + Math.random().toString(36).slice(2, 8);
+    chatImages[id] = rd.result;
+    doc.screens = doc.screens || {}; doc.screens[id] = rd.result;
+    persist(); drawAttached();
+    chatSay('You', 'Attached an image (' + f.name + '). Now say where it goes, '
+          + 'for example "put this on page 4".');
+  };
+  rd.readAsDataURL(f);
+};
+function drawAttached(){
+  const host = $('#chatAttached'); host.innerHTML = '';
+  Object.entries(chatImages).forEach(([id, src]) => {
+    const w = document.createElement('div'); w.className = 'item';
+    w.style.cssText += ';display:flex;gap:9px;align-items:center';
+    const img = document.createElement('img'); img.src = src;
+    img.style.cssText = 'height:52px;border-radius:6px';
+    const s = document.createElement('span');
+    s.style.cssText = 'font-size:12px;color:var(--muted);margin-right:auto';
+    s.textContent = id;
+    const rm = document.createElement('button'); rm.className='ghost';
+    rm.textContent='Remove';
+    rm.onclick = () => { delete chatImages[id]; drawAttached(); };
+    w.append(img, s, rm); host.append(w);
+  });
+}
+
+async function drawRules(){
+  const host = $('#ruleList'); host.innerHTML = '';
+  try {
+    const r = await (await fetch('/api/rules')).json();
+    if (!(r.rules || []).length) {
+      host.innerHTML = '<p class="lab">Nothing yet. Correct something twice '
+        + 'and it will appear here.</p>';
+      return;
+    }
+    r.rules.forEach(rule => {
+      const el = document.createElement('div'); el.className = 'item';
+      const t = document.createElement('div');
+      t.style.cssText = 'font-size:12.5px';
+      t.textContent = rule.text;
+      const w = document.createElement('div');
+      w.style.cssText = 'font-size:11.5px;color:var(--muted);margin-top:3px';
+      w.textContent = 'applies to ' + rule.field + ' \u00b7 corrected on '
+                    + rule.seen + ' proposals';
+      const off = document.createElement('button');
+      off.className = 'ghost'; off.textContent = 'Retire this rule';
+      off.style.marginTop = '6px';
+      off.onclick = async () => { await api('/api/rules/mute', {name: rule.norm});
+                                  drawRules(); };
+      el.append(t, w, off); host.append(el);
+    });
+  } catch (e) { /* the rule list is informational */ }
+}
+
+async function drawPrefs(){
+  const host = $('#prefBox'); host.innerHTML = '';
+  try {
+    const r = await api('/api/preferences/suggest', {data: data()});
+    (r.suggestions || []).forEach(p => {
+      const el = document.createElement('div');
+      el.className = 'note'; el.style.marginTop = '12px';
+      const txt = document.createElement('div');
+      txt.innerHTML = '<b>You usually ask for this</b>';
+      const s = document.createElement('div');
+      s.textContent = '"' + p.text + '" \u2014 on ' + p.seen + ' proposals so far.';
+      txt.append(s); el.append(txt);
+      const go = document.createElement('button');
+      go.className = 'primary'; go.style.marginTop = '8px';
+      go.textContent = 'Do it now';
+      go.onclick = () => { $('#chatText').value = p.text; $('#btnChat').click(); };
+      const no = document.createElement('button');
+      no.className = 'ghost'; no.textContent = 'Stop suggesting';
+      no.onclick = async () => { await api('/api/preferences/mute', {name: p.norm});
+                                 drawPrefs(); };
+      el.append(go, no); host.append(el);
+    });
+  } catch (e) { /* preferences are a nicety, never a blocker */ }
+}
+
+$('#btnChat').onclick = async () => {
+  const text = $('#chatText').value.trim();
+  if (!text) return;
+  chatSay('You', text);
+  $('#chatText').value = '';
+  $('#btnChat').disabled = true;
+  progress('The assistant is working',
+           'Reading the proposal, deciding what to change, and checking it is '
+           + 'allowed to change it', 35, 20);
+  try {
+    const r = await api('/api/chat', {data: data(), instruction: text,
+                                      proposal_id: pid || '', images: chatImages});
+    progress('Applying the change', 'Redrawing the affected pages', 85, 4);
+    if (r.rule && r.rule.is_rule)
+      chatSay('Assistant', 'Learned. Your team has corrected this on '
+            + r.rule.seen + ' proposals, so I will write it that way from the '
+            + 'start on every future proposal.');
+    else if (r.learned && r.learned.is_preference)
+      chatSay('Assistant', 'Noted. You have asked for this on '
+            + r.learned.seen + ' proposals, so I will offer it next time.');
+    if (!r.applied) chatSay('Assistant', r.note || 'Nothing was changed.', 'err');
+    else {
+      chatSay('Assistant', r.note || (r.applied + ' change(s) made.'));
+      commit(d => Object.assign(d, r.data), 'assistant: ' + text.slice(0, 60));
+    }
+  } catch (e) { chatSay('Assistant', e.message, 'err'); }
+  progressDone();
+  $('#btnChat').disabled = false; busy('');
+};
+
+fetch('/api/health').then(r=>r.json()).then(j=>{
+  if (!j.staged_endpoints)
+    toast('This page is talking to an older server build. Redeploy, then hard-refresh.', 'err');
+  else if (!j.anthropic_key_set)
+    toast('ANTHROPIC_API_KEY is not set on the server. Generate will fail.', 'err');
+}).catch(()=>{});
+
+function applyUser(){
+  if (!user) return;
+  $('#avatar').textContent = (user.name || user.email || '?')
+    .split(/[\s@.]+/).slice(0, 2).map(s => s[0] || '').join('').toUpperCase();
+  $('#adminWrap').style.display = user.role === 'admin' ? '' : 'none';
+}
+
+fetch('/api/auth/me').then(r=>r.json()).then(async j => {
+  if (j.user) { user = j.user; applyUser(); await showList(); }
+}).catch(()=>{});
+</script>
+</body>
+</html>

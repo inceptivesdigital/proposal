@@ -187,16 +187,23 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.1-currency-docs"
+BUILD = "2026-08-29.3-db-probe"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
 def production_warnings():
     """Things that are fine on a laptop and not fine in front of clients."""
     out = []
-    if not SQL.IS_PG:
-        out.append("No DATABASE_URL, so this is running on a local SQLite file. "
-                   "On a serverless host that file disappears.")
+    reachable, detail = SQL.ping()
+    if not reachable:
+        out.append("The database is not reachable: %s" % detail)
+    if not SQL.persistent():
+        out.append("No DATABASE_URL, and the only writable place here is a "
+                   "temporary folder. Accounts and proposals will disappear "
+                   "when the server restarts. Add DATABASE_URL.")
+    elif not SQL.IS_PG:
+        out.append("Running on a local SQLite file. Fine on your own machine, "
+                   "not on a serverless host.")
     if not MAIL.configured():
         out.append("No mail server, so sign-up codes are printed to the log "
                    "instead of emailed.")
@@ -246,6 +253,8 @@ def health():
         "ok": True,
         "build": BUILD,
         "database": SQL.backend(),
+        "database_reachable": SQL.ping()[0],
+        "tables": SQL.table_check(),
         "mail_configured": MAIL.configured(),
         "warnings": production_warnings(),
         "staged_endpoints": True,
@@ -632,6 +641,19 @@ def api_signup(body: AuthIn):
         code = DB.start_signup(body.email, body.password, body.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    except Exception as exc:                                  # noqa: BLE001
+        # on a fresh deployment this is almost always storage
+        ok, detail = SQL.ping()
+        if not ok:
+            raise HTTPException(
+                500, "The database is not reachable, so accounts cannot be "
+                     "created. %s" % detail)
+        if not SQL.persistent():
+            raise HTTPException(
+                500, "The server has nowhere to save accounts. Add a "
+                     "DATABASE_URL environment variable pointing at your "
+                     "Postgres database, then redeploy.")
+        raise HTTPException(500, "Could not start the sign-up: %s" % exc)
     try:
         sent = MAIL.send_code(body.email.strip().lower(), code)
     except Exception as exc:                                  # noqa: BLE001

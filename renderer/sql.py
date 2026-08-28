@@ -7,16 +7,40 @@ which is underneath.
 import os
 import re
 import sqlite3
+import tempfile
 import threading
 
 URL = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or
        os.environ.get("POSTGRES_URL_NON_POOLING") or "")
 IS_PG = URL.startswith("postgres")
 
-SQLITE_PATH = os.environ.get(
+def _writable(path):
+    folder = os.path.dirname(path) or "."
+    try:
+        os.makedirs(folder, exist_ok=True)
+        probe = os.path.join(folder, ".write-probe")
+        with open(probe, "w") as fh:
+            fh.write("x")
+        os.remove(probe)
+        return True
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+_WANTED = os.environ.get(
     "PROPOSAL_DB",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                  "proposals.db"))
+
+# On a serverless host the project folder is read-only, so fall back to /tmp.
+# That works, but /tmp is wiped when the function goes cold, so it is flagged
+# loudly rather than silently losing people's accounts.
+EPHEMERAL = False
+if not IS_PG and not _writable(_WANTED):
+    _WANTED = os.path.join(tempfile.gettempdir(), "proposals.db")
+    EPHEMERAL = True
+
+SQLITE_PATH = _WANTED
 
 _local = threading.local()
 
@@ -122,7 +146,14 @@ def connect():
 
 
 def backend():
-    return "postgres" if IS_PG else "sqlite"
+    if IS_PG:
+        return "postgres"
+    return "sqlite (temporary)" if EPHEMERAL else "sqlite"
+
+
+def persistent():
+    """Will anything written here survive? Only Postgres, or a real disk."""
+    return IS_PG or not EPHEMERAL
 
 
 def ping():
@@ -133,3 +164,23 @@ def ping():
         return True, backend()
     except Exception as exc:                                  # noqa: BLE001
         return False, str(exc)[:200]
+
+
+def table_check():
+    """Which tables exist. A fresh database that never got its schema is the
+    usual reason sign-up fails on an otherwise healthy deployment."""
+    want = ["users", "sessions", "pending", "proposals", "versions", "activity"]
+    try:
+        with connect() as c:
+            if IS_PG:
+                rows = c.execute(
+                    "SELECT table_name AS name FROM information_schema.tables "
+                    "WHERE table_schema = 'public'").fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        have = {r["name"] for r in rows}
+        return {"present": sorted(have & set(want)),
+                "missing": sorted(set(want) - have)}
+    except Exception as exc:                                  # noqa: BLE001
+        return {"error": str(exc)[:200]}

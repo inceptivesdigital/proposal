@@ -1727,6 +1727,19 @@ const authApi = async (url, body) => {
   return j;
 };
 // tell people the rules before they hit them
+fetch('/api/health').then(r => r.json()).then(j => {
+  if (!(j.warnings || []).length) return;
+  const box = document.createElement('div');
+  box.className = 'banner warn';
+  box.style.marginBottom = '12px';
+  box.innerHTML = '<b>This deployment is not finished</b>';
+  const ul = document.createElement('div');
+  ul.style.cssText = 'margin-top:5px;font-size:12px';
+  ul.textContent = j.warnings.join('  ');
+  box.append(ul);
+  $('#signBox').prepend(box);
+}).catch(()=>{});
+
 fetch('/api/auth/me').then(r => r.json()).then(j => {
   const doms = (j.allowed_domains || []).map(d => '@' + d).join(' or ');
   if (doms) $('#signSub').textContent =

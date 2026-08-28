@@ -1,0 +1,7 @@
+fastapi
+pydantic
+reportlab
+pillow
+pypdfium2
+anthropic
+psycopg[binary]

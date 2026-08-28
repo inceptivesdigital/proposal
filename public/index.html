@@ -221,6 +221,15 @@
         placeholder="at least 10 characters"></div>
       <div id="authMsg"></div>
       <button class="primary" id="btnAuth" style="width:100%">Sign in</button>
+      <div id="resetStep" style="display:none;margin-top:14px">
+        <div class="field"><p class="lab">Six-digit code from your email</p>
+          <input id="rCode" inputmode="numeric" maxlength="6"
+                 placeholder="000000" style="letter-spacing:5px;font-size:17px"></div>
+        <div class="field"><p class="lab">New password</p>
+          <input id="rPass" type="password" placeholder="at least 10 characters"></div>
+        <button class="primary" id="btnResetFinish" style="width:100%">
+          Set the new password</button>
+      </div>
       <div id="codeStep" style="display:none;margin-top:14px">
         <div class="field"><p class="lab">Six-digit code from your email</p>
           <input id="aCode" inputmode="numeric" maxlength="6"
@@ -230,7 +239,10 @@
           <a href="#" id="resendCode" style="color:var(--blue)">Send another code</a></p>
       </div>
       <p class="lab" style="margin-top:12px;text-align:center">
-        <a href="#" id="toggleAuth" style="color:var(--blue)">Create an account instead</a></p>
+        <a href="#" id="toggleAuth" style="color:var(--blue)">Create an account instead</a>
+        <span id="forgotWrap"> &nbsp;·&nbsp;
+          <a href="#" id="forgotLink" style="color:var(--blue)">Forgotten your password?</a>
+        </span></p>
     </div>
 
     <div id="listBox" style="background:#fff;border:1px solid var(--line);
@@ -1042,11 +1054,15 @@ $('#btnGenerate').onclick = async () => {
              38, 40);
     const f = await api('/api/front', {brief: b.brief, meta});
     progress('Laying out the features',
-             'Grouping features by interface, choosing the technical stack, '
-             + 'writing the milestone descriptions', 68, 30);
-    const r = await api('/api/features', {brief: b.brief, front: f.front, meta,
-                                          milestones, total_value});
-    progress('Building the pages', 'Drawing 15 pages at print resolution', 92, 6);
+             'Grouping the features by interface and writing each page', 58, 45);
+    const feats = await api('/api/features', {brief: b.brief, front: f.front,
+                                              meta, milestones, total_value});
+    progress('Technical requirements and milestones',
+             'Choosing the stack and the integrations, and writing a line for '
+             + 'each milestone', 80, 25);
+    const r = await api('/api/technical', {brief: b.brief, front: f.front,
+                        features: feats.features, meta, milestones, total_value});
+    progress('Building the pages', 'Drawing the pages at print resolution', 94, 6);
     newDoc(r.data, meta.project_name);
     try {
       const created = await api('/api/proposals', {data: r.data});
@@ -1055,8 +1071,16 @@ $('#btnGenerate').onclick = async () => {
     progressDone('Proposal generated and saved to your account. '
                + 'Review the layout checks, then add the UI screens.');
     if ((r.warnings||[]).length) toast(r.warnings.join(' '), 'err');
-  } catch (e) { progressDone(); toast('Generate failed. ' + e.message, 'err');
-                dlgNew.showModal(); }
+  } catch (e) {
+    progressDone();
+    const msg = /504/.test(e.message)
+      ? 'That step took longer than the server allows. On Vercel Hobby a '
+      + 'request is cut off at 60 seconds; Pro allows 300. Either upgrade, or '
+      + 'set PROPOSAL_MODEL to claude-sonnet-5, which is several times faster.'
+      : e.message;
+    toast('Generate failed. ' + msg, 'err');
+    dlgNew.showModal();
+  }
   $('#btnGenerate').disabled = false;
 };
 
@@ -1775,7 +1799,10 @@ $('#toggleAuth').onclick = e => {
   $('#btnAuth').textContent   = signMode === 'login' ? 'Sign in' : 'Create account';
   $('#nameField').style.display = signMode === 'login' ? 'none' : '';
   $('#codeStep').style.display = 'none';
+  $('#resetStep').style.display = 'none';
+  $('#forgotWrap').style.display = signMode === 'login' ? '' : 'none';
   $('#btnAuth').style.display = '';
+  resetting = false;
   $('#toggleAuth').textContent = signMode === 'login'
     ? 'Create an account instead' : 'I already have an account';
   authMsg('');
@@ -1801,6 +1828,37 @@ $('#btnAuth').onclick = async () => {
     $('#btnAuth').disabled = false;
   }
 };
+// ------------------------------------------------------ forgotten password
+let resetting = false;
+$('#forgotLink').onclick = async e => {
+  e.preventDefault();
+  authMsg('');
+  const email = $('#aEmail').value.trim();
+  if (!email) { authMsg('Enter your email address first, then click again.');
+                $('#aEmail').focus(); return; }
+  try {
+    const j = await authApi('/api/auth/reset', {email});
+    resetting = true;
+    $('#signTitle').textContent = 'Reset your password';
+    $('#btnAuth').style.display = 'none';
+    $('#codeStep').style.display = 'none';
+    $('#resetStep').style.display = '';
+    $('#forgotWrap').style.display = 'none';
+    authMsg(j.note, true);
+    $('#rCode').focus();
+  } catch (err) { authMsg(err.message); }
+};
+$('#btnResetFinish').onclick = async () => {
+  authMsg('');
+  try {
+    const j = await authApi('/api/auth/reset-finish',
+      {email: $('#aEmail').value.trim(), code: $('#rCode').value.trim(),
+       password: $('#rPass').value});
+    user = j.user; applyUser(); await showList();
+  } catch (e) { authMsg(e.message); }
+};
+$('#rPass').onkeydown = e => { if (e.key === 'Enter') $('#btnResetFinish').click(); };
+
 $('#btnVerify').onclick = async () => {
   authMsg('');
   try {

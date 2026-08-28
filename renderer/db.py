@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE TABLE IF NOT EXISTS pending (
   email TEXT PRIMARY KEY, name TEXT, pw_hash TEXT, salt TEXT,
   code_hash TEXT, expires INTEGER, tries INTEGER DEFAULT 0, sent_at INTEGER);
+CREATE TABLE IF NOT EXISTS resets (
+  email TEXT PRIMARY KEY, code_hash TEXT, salt TEXT, expires INTEGER,
+  tries INTEGER DEFAULT 0, sent_at INTEGER);
 CREATE TABLE IF NOT EXISTS activity (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, user_id TEXT, email TEXT,
   action TEXT, detail TEXT, proposal_id TEXT);
@@ -172,6 +175,71 @@ def start_signup(email, password, name=""):
                    salt, _hash(code, salt),
                    int(time.time()) + OTP_MINUTES * 60, int(time.time())))
     return code
+
+
+def start_reset(email):
+    """Issue a reset code. The reply is the same whether or not the account
+    exists, so this cannot be used to discover who has one."""
+    email = (email or "").strip().lower()
+    with conn() as c:
+        row = c.execute("SELECT id FROM users WHERE email=? AND disabled=0",
+                        (email,)).fetchone()
+        if not row:
+            return None
+        prev = c.execute("SELECT sent_at FROM resets WHERE email=?",
+                         (email,)).fetchone()
+        if prev and prev["sent_at"] and int(time.time()) - prev["sent_at"] < 45:
+            raise ValueError("A code was just sent. Check your inbox, or wait "
+                             "a moment before asking for another.")
+        salt = secrets.token_hex(16)
+        code = "%06d" % secrets.randbelow(1000000)
+        c.execute("DELETE FROM resets WHERE email=?", (email,))
+        c.execute("INSERT INTO resets (email,code_hash,salt,expires,tries,"
+                  "sent_at) VALUES (?,?,?,?,0,?)",
+                  (email, _hash(code, salt), salt,
+                   int(time.time()) + OTP_MINUTES * 60, int(time.time())))
+    note_activity(row["id"], email, "asked to reset their password")
+    return code
+
+
+def finish_reset(email, code, new_password):
+    """Check the code, set the new password, and end every existing session."""
+    email = (email or "").strip().lower()
+    if len(new_password or "") < 10:
+        raise ValueError("Use a password of at least 10 characters.")
+    with conn() as c:
+        row = c.execute("SELECT * FROM resets WHERE email=?", (email,)).fetchone()
+        if not row:
+            raise ValueError("No reset is waiting for that address. Start again.")
+        if row["expires"] < int(time.time()):
+            c.execute("DELETE FROM resets WHERE email=?", (email,))
+            raise ValueError("That code has expired. Ask for a new one.")
+        if row["tries"] >= OTP_MAX_TRIES:
+            c.execute("DELETE FROM resets WHERE email=?", (email,))
+            raise ValueError("Too many wrong codes. Start the reset again.")
+        if not hmac.compare_digest(_hash(code or "", row["salt"]),
+                                   row["code_hash"]):
+            c.execute("UPDATE resets SET tries = tries + 1 WHERE email=?",
+                      (email,))
+            raise ValueError("That code is not right.")
+        user = c.execute("SELECT id, name, role FROM users WHERE email=?",
+                         (email,)).fetchone()
+        salt = secrets.token_hex(16)
+        c.execute("UPDATE users SET pw_hash=?, salt=? WHERE email=?",
+                  (_hash(new_password, salt), salt, email))
+        c.execute("DELETE FROM resets WHERE email=?", (email,))
+        # anyone holding an old session is signed out, which is the point
+        c.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+        c.execute("DELETE FROM login_attempts WHERE email=?", (email,))
+    note_activity(user["id"], email, "reset their password",
+                  "all sessions ended")
+    return _issue(user["id"], email, user["name"], user["role"])
+
+
+def clear_reset(email):
+    with conn() as c:
+        c.execute("DELETE FROM resets WHERE email=?",
+                  ((email or "").strip().lower(),))
 
 
 def clear_pending(email):

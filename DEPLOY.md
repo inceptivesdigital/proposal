@@ -129,6 +129,18 @@ If administrator access is ever lost, run against the database:
 
 ---
 
+## Forgotten passwords
+
+On the sign-in screen: enter the email address, click **Forgotten your
+password?**, and a six-digit code is emailed. The code plus a new password of
+10 characters or more completes it.
+
+Resetting **ends every existing session for that account**, so if someone's
+password was the reason for the reset, anyone holding it is signed out.
+
+The reply is identical whether or not the address has an account, so the form
+cannot be used to find out who works here.
+
 ## 6. Check it
 
 Open `/api/health`:

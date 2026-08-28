@@ -22,7 +22,7 @@ if ROOT not in sys.path:
 from renderer import render                    # noqa: E402
 from renderer.edit import edit_node            # noqa: E402
 from renderer.extract import (                 # noqa: E402
-    extract, make_brief, make_front, make_features, combine,
+    extract, make_brief, make_front, make_features, make_technical, combine,
     make_screens, screen_slots)
 from renderer.uiscreens import render_screen    # noqa: E402
 from renderer import v0screens as V0            # noqa: E402
@@ -118,6 +118,15 @@ class FeaturesIn(BaseModel):
     total_value: float = 0
 
 
+class TechnicalIn(BaseModel):
+    brief: dict
+    front: dict
+    features: dict = {}
+    meta: dict
+    milestones: list = []
+    total_value: float = 0
+
+
 class ScreensPdfIn(BaseModel):
     pdf: str            # data URL or raw base64 of the UX Pilot export
     scale: float = 2.0
@@ -158,6 +167,16 @@ class VerifyIn(BaseModel):
     code: str
 
 
+class ResetStartIn(BaseModel):
+    email: str
+
+
+class ResetFinishIn(BaseModel):
+    email: str
+    code: str
+    password: str
+
+
 class SaveIn(BaseModel):
     data: dict
     note: str = "Edited"
@@ -187,7 +206,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.8-password-clean"
+BUILD = "2026-08-29.10-split-stages"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -426,12 +445,29 @@ def api_front(body: FrontIn, session: str = Cookie(None)):
 
 @app.post("/api/features")
 def api_features(body: FeaturesIn, session: str = Cookie(None)):
+    """Stage 3: the Core Features pages only."""
     _need_key()
     u = DB.user_for(session)
     USAGE.set_context(u["id"] if u else None, "new")
     try:
-        rest = make_features(body.brief, body.front, body.meta,
-                             len(body.milestones))
+        return {"features": make_features(body.brief, body.front, body.meta,
+                                          len(body.milestones))}
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/technical")
+def api_technical(body: TechnicalIn, session: str = Cookie(None)):
+    """Stage 4: the commercial, technical and milestone pages."""
+    _need_key()
+    u = DB.user_for(session)
+    USAGE.set_context(u["id"] if u else None, "new")
+    try:
+        tech = make_technical(body.brief, body.front,
+                              (body.features or {}).get("core_pages", []),
+                              body.meta, len(body.milestones))
+        rest = dict(body.features or {})
+        rest.update(tech)
         data = combine(body.front, rest, body.meta, body.milestones,
                        body.total_value)
     except Exception as exc:                                  # noqa: BLE001
@@ -706,6 +742,43 @@ def api_login(body: AuthIn, response: Response):
         out = DB.login(body.email, body.password)
     except ValueError as exc:
         raise HTTPException(401, str(exc))
+    response.set_cookie("session", out["token"], httponly=True, samesite="lax",
+                        secure=_secure_cookie(), max_age=60*60*24*14)
+    return {"user": out["user"]}
+
+
+@app.post("/api/auth/reset")
+def api_reset_start(body: ResetStartIn):
+    """Step one of a reset. The reply is identical whether or not the address
+    has an account, so this cannot be used to find out who does."""
+    same = {"pending": True,
+            "note": "If that address has an account, a six-digit code is on "
+                    "its way. It expires in 10 minutes."}
+    try:
+        code = DB.start_reset(body.email)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(500, "Could not start the reset: %s" % exc)
+    if not code:
+        return same
+    try:
+        MAIL.send_code(body.email.strip().lower(), code,
+                       "reset your password")
+    except Exception as exc:                                  # noqa: BLE001
+        DB.clear_reset(body.email)
+        raise HTTPException(400, "The code could not be sent. %s" % exc)
+    return same
+
+
+@app.post("/api/auth/reset-finish")
+def api_reset_finish(body: ResetFinishIn, response: Response):
+    """Step two. The code proves the address, the password is replaced, and
+    every existing session for that account is ended."""
+    try:
+        out = DB.finish_reset(body.email, body.code, body.password)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     response.set_cookie("session", out["token"], httponly=True, samesite="lax",
                         secure=_secure_cookie(), max_age=60*60*24*14)
     return {"user": out["user"]}

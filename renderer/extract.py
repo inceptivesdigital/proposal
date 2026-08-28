@@ -269,6 +269,8 @@ def _meter(msg, model, stage):
 
 
 def _stage_of(system):
+    if system.startswith(TECHNICAL_SYSTEM[:60]):
+        return "writing the technical pages"
     if system.startswith(BRIEF_SYSTEM[:60]):
         return "reading the transcript"
     if system.startswith(COPY_SYSTEM[:60]):
@@ -279,6 +281,8 @@ def _stage_of(system):
 
 
 def _var_for(system):
+    if system.startswith(TECHNICAL_SYSTEM[:60]):
+        return "PROPOSAL_TECHNICAL_TOKENS"
     if system.startswith(BRIEF_SYSTEM[:60]):
         return "PROPOSAL_BRIEF_TOKENS"
     if system.startswith(COPY_SYSTEM[:60]):
@@ -356,14 +360,41 @@ def make_front(brief, meta, client=None):
                  json.dumps(ctx, ensure_ascii=False), FRONT_TOKENS)
 
 
+TECHNICAL_SYSTEM = """You write the closing pages of an Inceptives Digital proposal, from a brief and the feature pages already written.
+
+Return exactly:
+{"page9":{"include":false},
+ "page10":{"stack":[{"title":"Frontend","body":"...","icon":"ic_code"}],
+           "services":[{"title":"...","body":"...","icon":"ic_..."}],
+           "footnote":"..."},
+ "page12_descriptions":["one line per milestone, in order"],
+ "page14_risk_area":"the nature of ..."}
+
+Include page9 only if the brief names a commercial angle; if so give it a headline of three short lines, a description, three cards and a promo message.
+page10.stack is 4 to 6 core technologies, services 4 to 8 integrations, both specific to this product and each matching a feature described earlier.
+page14_risk_area is a noun phrase beginning with "the", naming what about this app is most likely to draw app-store scrutiny.
+British-neutral, plain, no hype, no em-dashes. Return only JSON."""
+
+
 def make_features(brief, front, meta, milestone_count, client=None):
-    """Stage 3. Core Features pages, page 9, page 10, milestone descriptions."""
+    """Stage 3. The Core Features pages only, so the request stays short."""
     ctx = {"brief": brief, "front": front, "allowed_icons": ICON_NAMES,
+           "client_company": meta.get("client_company"),
+           "project_name": meta.get("project_name")}
+    return _call(_client(client), FEATURES_SYSTEM + house_rules_block(),
+                 json.dumps(ctx, ensure_ascii=False), FEATURE_TOKENS)
+
+
+def make_technical(brief, front, core_pages, meta, milestone_count,
+                   client=None):
+    """Stage 4. Commercial page, technical requirements, milestone lines."""
+    ctx = {"brief": brief, "front": front, "core_pages": core_pages,
+           "allowed_icons": ICON_NAMES,
            "client_company": meta.get("client_company"),
            "project_name": meta.get("project_name"),
            "milestone_count": milestone_count}
-    return _call(_client(client), FEATURES_SYSTEM + house_rules_block(),
-                 json.dumps(ctx, ensure_ascii=False), FEATURE_TOKENS)
+    return _call(_client(client), TECHNICAL_SYSTEM + house_rules_block(),
+                 json.dumps(ctx, ensure_ascii=False), 6000)
 
 
 def combine(front, rest, meta, milestones, total_value):
@@ -385,7 +416,11 @@ def extract_staged(transcript, meta, milestones, total_value, client=None):
     client = _client(client)
     brief = make_brief(transcript, meta, client)
     front = make_front(brief, meta, client)
-    rest = make_features(brief, front, meta, len(milestones), client)
+    feats = make_features(brief, front, meta, len(milestones), client)
+    tech = make_technical(brief, front, feats.get("core_pages", []), meta,
+                          len(milestones), client)
+    rest = dict(feats)
+    rest.update(tech)
     return combine(front, rest, meta, milestones, total_value)
 
 

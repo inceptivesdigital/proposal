@@ -96,9 +96,10 @@ def _pg_connect():
                                 cursor_factory=psycopg2.extras.RealDictCursor)
     except ImportError:
         raise RuntimeError(
-            "DATABASE_URL is set but no Postgres driver is installed. "
-            "requirements.txt must contain psycopg[binary] or psycopg2-binary, "
-            "and the deployment must be rebuilt after adding it.")
+            "DATABASE_URL is set but no Postgres driver is installed. Add "
+            "psycopg[binary] to the dependencies list in pyproject.toml, not "
+            "only to requirements.txt: Vercel installs from pyproject.toml when "
+            "it exists. Then redeploy with the build cache turned off.")
 
 
 class Connection(object):

@@ -97,6 +97,13 @@ emailed, which is right on a laptop and wrong in production.
 
 ## 4. Deploy
 
+**Dependencies live in `pyproject.toml`.** Vercel installs from that file when
+it exists and ignores `requirements.txt`, so anything added to one must be added
+to the other. `/api/health` lists which packages actually loaded.
+
+When redeploying after a dependency change, **turn off the build cache**, or the
+install step is skipped and the package never arrives.
+
 Push to GitHub, or from the folder:
 
     vercel --prod

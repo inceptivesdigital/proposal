@@ -1,14 +1,18 @@
 [project]
 name = "proposal-creator"
 version = "1.0.0"
-description = "Inceptives Digital proposal generator"
+description = "Inceptives Digital Proposal Studio"
 requires-python = ">=3.12"
+# Vercel installs from this list, not requirements.txt, when a pyproject exists.
+# Keep the two files in step or a dependency added to one will silently vanish.
 dependencies = [
   "fastapi>=0.115",
+  "pydantic>=2.0",
   "reportlab>=4.0",
   "pillow>=10.0",
   "pypdfium2>=4.30",
   "anthropic>=0.40",
+  "psycopg[binary]>=3.1",
 ]
 
 [tool.vercel]

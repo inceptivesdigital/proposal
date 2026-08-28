@@ -1,8 +1,9 @@
-fastapi
-pydantic
-reportlab
-pillow
-pypdfium2
-anthropic
+# Kept in step with the dependencies list in pyproject.toml.
+# Vercel reads pyproject.toml; local installs and other hosts read this.
+fastapi>=0.115
+pydantic>=2.0
+reportlab>=4.0
+pillow>=10.0
+pypdfium2>=4.30
+anthropic>=0.40
 psycopg[binary]>=3.1
-psycopg2-binary>=2.9

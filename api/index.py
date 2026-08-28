@@ -187,8 +187,23 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.4-pg-driver"
+BUILD = "2026-08-29.5-pyproject-deps"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
+
+
+def _dependency_check():
+    """Which packages actually loaded. Vercel installs from pyproject.toml, so a
+    dependency listed only in requirements.txt never arrives."""
+    out = {}
+    for label, module in (("postgres", "psycopg"), ("pdf", "pypdfium2"),
+                          ("images", "PIL"), ("claude", "anthropic"),
+                          ("render", "reportlab")):
+        try:
+            __import__(module)
+            out[label] = "ok"
+        except ImportError:
+            out[label] = "MISSING, add it to pyproject.toml and rebuild"
+    return out
 
 
 def production_warnings():
@@ -255,6 +270,7 @@ def health():
         "database": SQL.backend(),
         "database_reachable": SQL.ping()[0],
         "db_driver": SQL.DRIVER[0] or "not loaded",
+        "dependencies": _dependency_check(),
         "tables": SQL.table_check(),
         "mail_configured": MAIL.configured(),
         "warnings": production_warnings(),

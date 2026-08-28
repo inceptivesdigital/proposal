@@ -254,7 +254,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.17-screen-flow"
+BUILD = "2026-08-29.18-file-check"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -274,6 +274,22 @@ def _deliver_screens(slots, pngs, proposal_id, engine):
     return {"stored": stored, "screens": inline,
             "count": len(stored) + len(inline), "engine": engine,
             "errors": [], "batched": True}
+
+
+REQUIRED_FILES = [
+    "public/index.html", "public/admin.html", "public/sample.json",
+    "public/assets/logo.png", "assets/plates/page1.jpg",
+    "assets/plates/base.jpg", "assets/plates/page4_clean.jpg",
+    "assets/fonts/GlancyrStatic-Medium.ttf",
+]
+
+
+def _file_check():
+    """A file that never reached the deployment is invisible until something
+    asks for it, so check the whole set up front."""
+    missing = [p for p in REQUIRED_FILES
+               if not os.path.isfile(os.path.join(ROOT, p))]
+    return {"missing": missing, "ok": not missing}
 
 
 def _dependency_check():
@@ -304,6 +320,10 @@ def production_warnings():
     elif not SQL.IS_PG:
         out.append("Running on a local SQLite file. Fine on your own machine, "
                    "not on a serverless host.")
+    gone = _file_check()["missing"]
+    if gone:
+        out.append("Files missing from this deployment: %s. Upload them and "
+                   "redeploy." % ", ".join(gone))
     if not MAIL.configured():
         out.append("No mail server, so sign-up codes are printed to the log "
                    "instead of emailed.")
@@ -338,8 +358,13 @@ def asset(name: str):
 @app.get("/admin")
 def admin_page():
     """The admin view is its own window, not a dialog over the editor."""
-    return FileResponse(os.path.join(PUBLIC, "admin.html"),
-                        headers={"cache-control": "no-store"})
+    path = os.path.join(PUBLIC, "admin.html")
+    if not os.path.isfile(path):
+        raise HTTPException(
+            503, "public/admin.html is missing from this deployment. It is a "
+                 "newer file; upload it with the rest of the public folder and "
+                 "redeploy. Everything else keeps working meanwhile.")
+    return FileResponse(path, headers={"cache-control": "no-store"})
 
 
 @app.get("/sample.json")
@@ -365,6 +390,7 @@ def health():
         "database": SQL.backend(),
         "db_driver": SQL.DRIVER[0] or "not loaded",
         "dependencies": _dependency_check(),
+        "files": _file_check(),
         "tables": SQL.table_check(),
         "mail": MAIL.check(),
         "mail_configured": MAIL.configured(),

@@ -1183,9 +1183,19 @@ $('#btnCredits').onclick = async () => {
 
 // ---------------------------------------------------------------- admin
 const money = n => '$' + (Number(n) || 0).toFixed(2);
-$('#btnAdmin').onclick = () => {
-  window.open('/admin', 'proposal-admin',
-              'width=1240,height=900,menubar=no,toolbar=no');
+$('#btnAdmin').onclick = async () => {
+  // check the page is actually deployed before opening a window at it
+  try {
+    const r = await fetch('/admin', {method: 'GET'});
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      return toast(j.detail || ('The admin page returned ' + r.status), 'err');
+    }
+  } catch (e) { return toast(e.message, 'err'); }
+  const w = window.open('/admin', 'proposal-admin',
+                        'width=1240,height=900,menubar=no,toolbar=no');
+  if (!w) toast('Your browser blocked the window. Allow pop-ups for this site, '
+              + 'or open /admin in a new tab.', 'err');
 };
 
 async function legacyAdmin(){

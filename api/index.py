@@ -254,7 +254,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.18-file-check"
+BUILD = "2026-08-29.19-static-paths"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -276,20 +276,24 @@ def _deliver_screens(slots, pngs, proposal_id, engine):
             "errors": [], "batched": True}
 
 
+# Only what the function itself opens. The public folder is served by the host's
+# static layer and is not inside the function bundle, so looking for it here
+# reports files missing that the browser is receiving perfectly well.
 REQUIRED_FILES = [
-    "public/index.html", "public/admin.html", "public/sample.json",
-    "public/assets/logo.png", "assets/plates/page1.jpg",
+    "assets/plates/page1.jpg", "assets/plates/page12.jpg",
     "assets/plates/base.jpg", "assets/plates/page4_clean.jpg",
     "assets/fonts/GlancyrStatic-Medium.ttf",
+    "assets/fonts/GlancyrStatic-Light.ttf",
 ]
 
 
 def _file_check():
-    """A file that never reached the deployment is invisible until something
-    asks for it, so check the whole set up front."""
+    """Everything the renderer needs at run time."""
     missing = [p for p in REQUIRED_FILES
                if not os.path.isfile(os.path.join(ROOT, p))]
-    return {"missing": missing, "ok": not missing}
+    return {"missing": missing, "ok": not missing,
+            "public_served_by": "static host" if not os.path.isfile(
+                os.path.join(PUBLIC, "index.html")) else "the function"}
 
 
 def _dependency_check():
@@ -359,12 +363,11 @@ def asset(name: str):
 def admin_page():
     """The admin view is its own window, not a dialog over the editor."""
     path = os.path.join(PUBLIC, "admin.html")
-    if not os.path.isfile(path):
-        raise HTTPException(
-            503, "public/admin.html is missing from this deployment. It is a "
-                 "newer file; upload it with the rest of the public folder and "
-                 "redeploy. Everything else keeps working meanwhile.")
-    return FileResponse(path, headers={"cache-control": "no-store"})
+    if os.path.isfile(path):
+        return FileResponse(path, headers={"cache-control": "no-store"})
+    # the host serves the public folder itself, so send the browser there
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/admin.html", status_code=307)
 
 
 @app.get("/sample.json")

@@ -1184,15 +1184,13 @@ $('#btnCredits').onclick = async () => {
 // ---------------------------------------------------------------- admin
 const money = n => '$' + (Number(n) || 0).toFixed(2);
 $('#btnAdmin').onclick = async () => {
-  // check the page is actually deployed before opening a window at it
+  // the host serves /admin.html directly; /admin is the fallback
+  let url = '/admin.html';
   try {
-    const r = await fetch('/admin', {method: 'GET'});
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      return toast(j.detail || ('The admin page returned ' + r.status), 'err');
-    }
-  } catch (e) { return toast(e.message, 'err'); }
-  const w = window.open('/admin', 'proposal-admin',
+    const r = await fetch(url, {method: 'HEAD'});
+    if (!r.ok) url = '/admin';
+  } catch (e) { url = '/admin'; }
+  const w = window.open(url, 'proposal-admin',
                         'width=1240,height=900,menubar=no,toolbar=no');
   if (!w) toast('Your browser blocked the window. Allow pop-ups for this site, '
               + 'or open /admin in a new tab.', 'err');

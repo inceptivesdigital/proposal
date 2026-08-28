@@ -75,13 +75,36 @@ class Cursor(object):
         return iter(self.fetchall())
 
 
+DRIVER = [None]          # "psycopg3" or "psycopg2", worked out once
+
+
+def _pg_connect():
+    """psycopg 3 if it is there, psycopg2 otherwise. Hosts differ on which
+    wheel they can build, so support both rather than pinning our hopes."""
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+        DRIVER[0] = "psycopg3"
+        return psycopg.connect(URL, row_factory=dict_row, autocommit=False)
+    except ImportError:
+        pass
+    try:
+        import psycopg2
+        import psycopg2.extras
+        DRIVER[0] = "psycopg2"
+        return psycopg2.connect(URL,
+                                cursor_factory=psycopg2.extras.RealDictCursor)
+    except ImportError:
+        raise RuntimeError(
+            "DATABASE_URL is set but no Postgres driver is installed. "
+            "requirements.txt must contain psycopg[binary] or psycopg2-binary, "
+            "and the deployment must be rebuilt after adding it.")
+
+
 class Connection(object):
     def __init__(self):
         if IS_PG:
-            import psycopg
-            from psycopg.rows import dict_row
-            self._c = psycopg.connect(URL, row_factory=dict_row,
-                                      autocommit=False)
+            self._c = _pg_connect()
         else:
             self._c = sqlite3.connect(SQLITE_PATH, timeout=20)
             self._c.row_factory = sqlite3.Row
@@ -147,7 +170,7 @@ def connect():
 
 def backend():
     if IS_PG:
-        return "postgres"
+        return "postgres (%s)" % (DRIVER[0] or "driver not loaded")
     return "sqlite (temporary)" if EPHEMERAL else "sqlite"
 
 

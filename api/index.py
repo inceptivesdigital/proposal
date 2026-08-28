@@ -187,7 +187,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.3-db-probe"
+BUILD = "2026-08-29.4-pg-driver"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -254,6 +254,7 @@ def health():
         "build": BUILD,
         "database": SQL.backend(),
         "database_reachable": SQL.ping()[0],
+        "db_driver": SQL.DRIVER[0] or "not loaded",
         "tables": SQL.table_check(),
         "mail_configured": MAIL.configured(),
         "warnings": production_warnings(),

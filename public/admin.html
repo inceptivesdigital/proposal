@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Inceptives Digital Proposal Studio</title>
+<style>
+  :root{--ink:#12151c;--muted:#6b7280;--faint:#9aa3b2;--line:#e7ebf2;
+        --bg:#f4f6fa;--blue:#4160aa;--blue-soft:#eaeffa;--green:#6d9c4f;
+        --green-soft:#eef6e6;--amber:#9a6b12;--amber-soft:#fdf4e3;--red:#b4443c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:13px 26px;background:#fff;
+         border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  header img{height:30px}
+  header .t{border-left:1px solid var(--line);padding-left:12px}
+  header b{display:block;font-size:14px}
+  header span{display:block;font-size:11.5px;color:var(--muted)}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;
+         border-radius:9px;padding:7px 13px;color:var(--ink)}
+  button:hover{border-color:#cfd7e6}
+  button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 26px 60px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+         gap:12px;margin-bottom:26px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 17px}
+  .card .k{font-size:10.5px;letter-spacing:.09em;color:var(--faint);
+           text-transform:uppercase}
+  .card .v{font-size:25px;margin-top:5px;letter-spacing:-.02em}
+  .card .n{font-size:12px;color:var(--muted);margin-top:2px}
+  h2{font-size:12px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase;
+     margin:26px 0 9px}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);
+        border-radius:12px;overflow:hidden}
+  th{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);
+     color:var(--muted);font-weight:600;font-size:12px;background:#fbfcfe}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;
+     vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .ok{color:var(--green);font-weight:600}
+  .bad{color:var(--red);font-weight:600}
+  .pill{font-size:11px;border-radius:99px;padding:2px 9px;background:var(--blue-soft);
+        color:var(--blue)}
+  .banner{border-radius:11px;padding:11px 14px;margin-bottom:14px;font-size:13px}
+  .banner.warn{background:var(--amber-soft);color:var(--amber)}
+  .empty{color:var(--faint);padding:20px;text-align:center}
+  .row{display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <img src="/assets/logo.png" alt="Inceptives Digital">
+  <div class="t"><b>Admin</b><span>Proposal Studio</span></div>
+  <div style="margin-left:auto" class="row">
+    <span id="stamp" style="font-size:12px;color:var(--muted)"></span>
+    <button id="refresh">Refresh</button>
+    <button class="primary" onclick="window.close()">Close</button>
+  </div>
+</header>
+<div class="wrap" id="body"><p class="empty">Loading…</p></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const money = n => '$' + (Number(n) || 0).toFixed(2);
+const esc = s => String(s == null ? '' : s);
+
+function card(k, v, n){
+  return '<div class="card"><div class="k">' + esc(k) + '</div>'
+       + '<div class="v">' + esc(v) + '</div>'
+       + (n ? '<div class="n">' + esc(n) + '</div>' : '') + '</div>';
+}
+function table(host, cols, rows, empty){
+  const h2 = document.createElement('table');
+  h2.innerHTML = '<thead><tr>' + cols.map(c => '<th>' + esc(c) + '</th>').join('')
+               + '</tr></thead>';
+  const b = document.createElement('tbody');
+  if (!rows.length) {
+    b.innerHTML = '<tr><td colspan="' + cols.length + '" class="empty">'
+                + esc(empty || 'Nothing yet') + '</td></tr>';
+  } else {
+    rows.forEach(cells => {
+      const tr = document.createElement('tr');
+      cells.forEach(v => {
+        const td = document.createElement('td');
+        if (v && v.html) td.innerHTML = v.html; else td.textContent = esc(v);
+        tr.append(td);
+      });
+      b.append(tr);
+    });
+  }
+  h2.append(b); host.append(h2);
+}
+function heading(host, text){
+  const h = document.createElement('h2'); h.textContent = text; host.append(h);
+}
+
+async function load(){
+  const host = $('#body');
+  host.innerHTML = '<p class="empty">Loading…</p>';
+  let r;
+  try {
+    const res = await fetch('/api/admin/overview');
+    r = await res.json();
+    if (res.status === 401 || res.status === 403) {
+      host.innerHTML = '<div class="banner warn">' + esc(r.detail
+        || 'Sign in to the studio as an administrator, then reopen this window.')
+        + '</div>';
+      return;
+    }
+  } catch (e) {
+    host.innerHTML = '<div class="banner warn">Could not load: '
+                   + esc(e.message) + '</div>';
+    return;
+  }
+  host.innerHTML = '';
+  $('#stamp').textContent = 'as of ' + new Date().toLocaleTimeString();
+
+  Object.entries(r).forEach(([k, v]) => {
+    if (v && v.error) {
+      const w = document.createElement('div');
+      w.className = 'banner warn'; w.textContent = v.error; host.append(w);
+    }
+  });
+
+  const h = r.health || {}, t = r.totals || {};
+  const cards = document.createElement('div');
+  cards.className = 'cards';
+  cards.innerHTML =
+      card('Total spend', money(t.cost), (t.calls || 0) + ' billable calls')
+    + card('Average proposal', money(r.average_proposal),
+           'across every proposal so far')
+    + card('People', (r.users || []).length,
+           (r.users || []).filter(u => u.role === 'admin').length + ' administrator(s)')
+    + card('Proposals costed', (r.by_proposal || []).length, 'with recorded usage')
+    + card('Tokens', ((t.tin || 0) + (t.tout || 0)).toLocaleString(),
+           (t.tin || 0).toLocaleString() + ' in, ' + (t.tout || 0).toLocaleString() + ' out');
+  host.append(cards);
+
+  heading(host, 'System health');
+  const db = r.database || {};
+  table(host, ['Check', 'Value'], [
+    ['Build', h.build],
+    ['Database', {html: esc(db.backend) + ' &middot; <span class="'
+      + (db.reachable ? 'ok">reachable' : 'bad">NOT REACHABLE') + '</span>'}],
+    ['Page artwork', {html: h.assets ? '<span class="ok">all 15 present</span>'
+                                     : '<span class="bad">missing</span>'}],
+    ['Claude key', {html: h.anthropic_key_set ? '<span class="ok">set</span>'
+                                              : '<span class="bad">not set</span>'}],
+    ['Writing model', h.generate_model],
+    ['Email for codes', {html: r.mail_configured ? '<span class="ok">configured</span>'
+                                                 : '<span class="bad">not configured</span>'}],
+    ['Fast screens', h.fast_screens ? 'ready' : 'not configured'],
+    ['v0 screens', h.v0_screens ? 'ready' : 'not configured'],
+    ['Screenshots', h.screenshot_provider],
+    ['Photos', h.photo_source],
+    ['Sign-up limited to', (h.allowed_domains || []).join(', ') || 'anyone'],
+  ]);
+
+  heading(host, 'Spend by user');
+  table(host, ['User', 'Proposals', 'Calls', 'Cost'],
+    (r.by_user || []).map(u => [u.email || 'unknown', u.proposals, u.calls,
+                                money(u.cost)]),
+    'No usage recorded yet');
+
+  heading(host, 'Spend by proposal');
+  table(host, ['Proposal', 'Owner', 'Calls', 'Cost'],
+    (r.by_proposal || []).map(p => [p.name || p.id, p.email, p.calls,
+                                    money(p.cost)]),
+    'No proposals costed yet');
+
+  heading(host, 'Where the money goes');
+  table(host, ['Service', 'Provider', 'Calls', 'Cost'],
+    (r.by_kind || []).map(k => [k.kind, k.provider, k.calls, money(k.cost)]));
+
+  heading(host, 'People');
+  table(host, ['User', 'Role', 'Joined', 'Last seen', ''],
+    (r.users || []).map(u => [
+      u.email, u.role + (u.disabled ? ' · disabled' : ''), u.created,
+      u.last_seen || 'never',
+      {html: '<div class="row">'
+        + '<button data-role="' + u.id + '" data-to="'
+        + (u.role === 'admin' ? 'member' : 'admin') + '">Make '
+        + (u.role === 'admin' ? 'member' : 'admin') + '</button>'
+        + '<button data-off="' + u.id + '" data-dis="' + (u.disabled ? '0' : '1')
+        + '">' + (u.disabled ? 'Enable' : 'Disable') + '</button></div>'}]));
+
+  heading(host, 'Activity by user');
+  table(host, ['User', 'Actions', 'Last action'],
+    (r.activity_by_user || []).map(a => [a.email || 'unknown', a.actions,
+                                         a.last_at]));
+
+  heading(host, 'What people have been doing');
+  table(host, ['When', 'Who', 'Action', 'Detail'],
+    (r.activity || []).map(a => [a.at, a.email || '-', a.action,
+                                 (a.detail || '').slice(0, 90)]));
+
+  heading(host, 'Billable calls');
+  table(host, ['When', 'What', 'Model', 'Stage', 'In', 'Out', 'Cost'],
+    (r.recent || []).map(x => [x.at, x.kind, x.model || '-', x.stage || '-',
+                               x.input_tokens, x.output_tokens, money(x.cost)]));
+
+  heading(host, 'What the system has learned');
+  table(host, ['Rule', 'Applies to', 'Seen on'],
+    (r.rules || []).map(x => [x.text, x.field, x.seen + ' proposals']),
+    'Nothing yet. A correction made on two proposals becomes a rule.');
+
+  host.querySelectorAll('[data-role]').forEach(b => b.onclick = async () => {
+    await fetch('/api/admin/user-role', {method:'POST',
+      headers:{'content-type':'application/json'},
+      body: JSON.stringify({user_id: b.dataset.role, role: b.dataset.to})});
+    load();
+  });
+  host.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
+    await fetch('/api/admin/user-disabled', {method:'POST',
+      headers:{'content-type':'application/json'},
+      body: JSON.stringify({user_id: b.dataset.off,
+                            disabled: b.dataset.dis === '1'})});
+    load();
+  });
+}
+
+$('#refresh').onclick = load;
+load();
+setInterval(load, 60000);          // keep it current while the window is open
+</script>
+</body>
+</html>

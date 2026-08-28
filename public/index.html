@@ -435,10 +435,8 @@
 
 <dialog id="dlgScreens"><h3>UI screens</h3><div class="in">
   <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-    <button class="primary" id="btnFillMissing">Fill missing screens</button>
-    <button id="btnAutoScreens">Regenerate all</button>
-    <button id="btnOneScreen">Try one screen</button>
-    <button id="btnRecover">Fetch from v0</button>
+    <button class="primary" id="btnGenScreens">Generate screens</button>
+    <button id="btnScratch">Build from scratch</button>
     <select id="screenEngine" style="width:auto">
       <option value="auto">Best available</option>
       <option value="fast">Fast (about a minute, photographic)</option>
@@ -446,6 +444,14 @@
       <option value="builtin">Built in (instant, no photos)</option>
       <option value="none">No screens at all</option></select>
     <button id="btnTestKeys">Test keys</button>
+  </div>
+  <div class="field">
+    <p class="lab">Build only certain screens</p>
+    <div style="display:flex;gap:9px;align-items:center">
+      <input id="pickNumbers" placeholder="2, 5, 6" style="max-width:170px">
+      <button id="btnPickBuild">Build those</button>
+      <span class="hint">Numbers from the list below</span>
+    </div>
   </div>
   <div class="field"><p class="lab">Or import a UX Pilot PDF export</p>
     <input type="file" id="pdfPick" accept="application/pdf"></div>
@@ -528,7 +534,7 @@ function persist(note){
   saveTimer = setTimeout(async () => {
     try {
       await api('/api/proposals/' + pid + '/save',
-                {data: data(), note: note || 'Edited', screens: doc.screens || {}});
+                {data: data(), note: note || 'Edited'});
       doc.dirty = false;
       $('#docState').textContent = 'Saved';
       $('#dirtyDot').className = 'dot saved';
@@ -621,7 +627,7 @@ const schedulePreview = () => { clearTimeout(previewTimer);
 async function refreshPreview(){
   try {
     const r = await api('/api/preview', {data: data(), page, scale: 1.6,
-                                         screens_data: doc.screens || {}});
+                                         proposal_id: pid || ''});
     $('#preview').src = r.png;
     doc.thumbs = doc.thumbs || {}; doc.thumbs[page] = r.png;
     paintZoom();
@@ -1000,7 +1006,7 @@ $('#btnSave').onclick = async () => {
   if (!pid) return toast('This proposal is not saved to your account yet.', 'err');
   try {
     const j = await api('/api/proposals/' + pid + '/save',
-                        {data: data(), note: 'Saved by hand', screens: doc.screens||{}});
+                        {data: data(), note: 'Saved by hand'});
     doc.dirty = false; refreshAll(); toast('Saved as version ' + j.version + '.');
   } catch (e) { toast(e.message, 'err'); }
 };
@@ -1177,7 +1183,12 @@ $('#btnCredits').onclick = async () => {
 
 // ---------------------------------------------------------------- admin
 const money = n => '$' + (Number(n) || 0).toFixed(2);
-$('#btnAdmin').onclick = async () => {
+$('#btnAdmin').onclick = () => {
+  window.open('/admin', 'proposal-admin',
+              'width=1240,height=900,menubar=no,toolbar=no');
+};
+
+async function legacyAdmin(){
   const host = $('#adminBody');
   host.innerHTML = '<p class="lab">Loading\u2026</p>';
   dlgAdmin.showModal();
@@ -1364,12 +1375,35 @@ $('#btnVersions').onclick = async () => {
 $('#btnPdf').onclick = async () => {
   toast('Building the PDF\u2026');
   try {
-    const r = await api('/api/render', {data: data(), screens_data: doc.screens || {}});
+    const r = await api('/api/render', {data: data(), proposal_id: pid || ''});
     const a = document.createElement('a');
     a.href = 'data:application/pdf;base64,' + r.pdf; a.download = r.filename; a.click();
     if (!r.milestones_ok) toast(r.milestone_warning, 'err'); else toast('PDF exported.');
   } catch (e) { toast(e.message, 'err'); }
 };
+
+// screens live on the server; the browser only ever knows their names
+const screenUrl = slot =>
+  '/api/screens/' + encodeURIComponent(pid || '') + '/' + encodeURIComponent(slot)
+  + '?v=' + ((doc.screens || {})[slot] || '');
+
+async function putScreen(slot, dataUrl){
+  if (!pid) throw new Error('Save this proposal before adding screens.');
+  const r = await api('/api/screens/put',
+                      {proposal_id: pid, slot, data: dataUrl});
+  doc.screens = doc.screens || {};
+  doc.screens[slot] = r.sha;          // a marker, not the image
+  return r;
+}
+
+async function loadScreenIndex(){
+  if (!pid) return;
+  try {
+    const r = await (await fetch('/api/screens/list/' + pid)).json();
+    doc.screens = {};
+    (r.screens || []).forEach(s => { doc.screens[s.slot] = s.sha; });
+  } catch (e) { /* the list is a convenience */ }
+}
 
 function screenSlots(){
   const D = data(), out = [];
@@ -1452,11 +1486,15 @@ $('#btnQAApply').onclick = async () => {
 $('#btnScreens').onclick = () => { drawScreenList(); dlgScreens.showModal(); };
 function drawScreenList(){
   const host = $('#screenList'); host.innerHTML = '';
-  screenSlots().forEach(slot => {
+  const head = document.createElement('div'); head.className = 'sect';
+  head.textContent = 'Screens this proposal needs';
+  host.append(head);
+  screenSlots().forEach((slot, idx) => {
     const has = !!(doc.screens && doc.screens[slot.id]);
     const wrap = document.createElement('div'); wrap.className='item';
     const row = document.createElement('div'); row.className='row';
-    const s = document.createElement('strong'); s.textContent = slot.label;
+    const s = document.createElement('strong');
+    s.textContent = (idx + 1) + '.  ' + slot.label;
     const t = document.createElement('span'); t.className = 'tag' + (has ? '' : ' off');
     t.textContent = has ? 'attached' : 'empty';
     row.append(s, t); wrap.append(row);
@@ -1464,36 +1502,30 @@ function drawScreenList(){
     file.type='file'; file.accept='image/png,image/jpeg';
     file.onchange = () => { const f = file.files[0]; if(!f) return;
       const rd = new FileReader();
-      rd.onload = () => { doc.screens = doc.screens||{}; doc.screens[slot.id]=rd.result;
-        slot.set(slot.id); persist(); drawScreenList(); schedulePreview(); };
+      rd.onload = async () => {
+        try {
+          await putScreen(slot.id, rd.result);
+          slot.set(slot.id); persist(); drawScreenList(); schedulePreview();
+        } catch (e) { toast(e.message, 'err'); }
+      };
       rd.readAsDataURL(f); };
     wrap.append(file);
-    if (has) { const img=document.createElement('img'); img.src=doc.screens[slot.id];
+    if (has) { const img=document.createElement('img'); img.src=screenUrl(slot.id);
       img.style.cssText='max-height:110px;margin-top:8px;border-radius:8px;display:block';
       wrap.append(img);
       const again = document.createElement('button'); again.className='ghost';
-      again.textContent='Replace just this one';
-      again.onclick = () => { delete doc.screens[slot.id]; persist();
-                              runScreens(false, 'missing'); };
+      again.textContent='Replace this one';
+      again.onclick = async () => {
+        if (pid) await fetch('/api/screens/' + pid + '/' + slot.id,
+                             {method:'DELETE'}).catch(()=>{});
+        delete doc.screens[slot.id]; persist();
+        runScreens('pick', [idx + 1]);
+      };
       wrap.append(again);
     } else {
       const one = document.createElement('button'); one.className='ghost';
-      one.textContent='Generate just this one';
-      one.onclick = async () => {
-        progress('Building one screen', slot.label, 45, 70);
-        try {
-          const r = await api('/api/auto-screens', {data: data(), brief: {},
-                              engine: $('#screenEngine').value,
-                              slot_ids: [slot.id]});
-          progressDone();
-          doc.screens = Object.assign(doc.screens||{}, r.screens||{});
-          doc.screen_sources = Object.assign(doc.screen_sources||{}, r.sources||{});
-          if ((r.screens||{})[slot.id]) slot.set(slot.id);
-          persist(); drawScreenList(); schedulePreview();
-          toast((r.errors||[]).length ? r.errors[0] : 'Screen added.',
-                (r.errors||[]).length ? 'err' : undefined);
-        } catch (e) { progressDone(); toast(e.message, 'err'); }
-      };
+      one.textContent='Build this one';
+      one.onclick = () => runScreens('pick', [idx + 1]);
       wrap.append(one);
     }
     host.append(wrap);
@@ -1501,76 +1533,99 @@ function drawScreenList(){
   if (!host.children.length)
     host.innerHTML = '<p class="empty">Generate a proposal first.</p>';
 }
-async function runScreens(only, mode){
+async function absorbScreens(r){
+  doc.screens = doc.screens || {};
+  (r.stored || []).forEach(id => { doc.screens[id] = 'stored'; });
+  for (const [id, url] of Object.entries(r.screens || {})) {
+    try { await putScreen(id, url); }
+    catch (e) { doc.screens[id] = url; }        // unsaved proposal: keep it here
+  }
+  screenSlots().forEach(s => { if (doc.screens[s.id]) s.set(s.id); });
+  persist();
+}
+
+async function runScreens(mode, numbers){
   const engine = $('#screenEngine').value;
-  const have = Object.keys(doc.screens || {})
-                     .filter(k => screenSlots().some(s => s.id === k));
 
   if (engine === 'none') {           // strip every mockup from the proposal
+    dlgScreens.close();
     commit(d => { d.no_screens = true; }, 'removed the UI mockups');
     doc.screens = {}; persist(); drawScreenList();
     return toast('Mockups removed. The feature text now fills the space.');
   }
   if (data().no_screens) commit(d => { d.no_screens = false; }, 'mockups back on');
 
-  let slots = [];
-  try { slots = (await api('/api/screen-slots', {data: data()})).slots; }
+  let all = [];
+  try { all = (await api('/api/screen-slots', {data: data()})).slots; }
   catch (e) { return toast(e.message, 'err'); }
-  if (!slots.length) return toast('No screen slots in this proposal.', 'err');
-  if (mode === 'missing') {
-    slots = slots.filter(s => !(doc.screens || {})[s.id]);
-    if (!slots.length)
-      return toast('Every slot already has a screen. Use Regenerate all to '
-                 + 'replace them.');
+  if (!all.length) return toast('No screen slots in this proposal.', 'err');
+
+  // anything already built is reused, whichever engine made it
+  await loadScreenIndex();
+  let slots = all;
+  if (mode === 'pick') {
+    slots = numbers.map(n => all[n - 1]).filter(Boolean);
+    if (!slots.length) return toast('Those numbers are outside the list.', 'err');
+  } else if (mode !== 'scratch') {
+    await reclaimExisting(all);            // free before we spend anything
+    const already = all.filter(s => (doc.screens || {})[s.id]).length;
+    slots = all.filter(s => !(doc.screens || {})[s.id]);
+    if (!slots.length) {
+      drawScreenList();
+      return toast('All ' + all.length + ' screens are already in place. Use '
+                 + '"Build from scratch" to replace them.');
+    }
+    if (already) toast('Keeping the ' + already + ' screen(s) you already have, '
+                     + 'building the other ' + slots.length + '.');
   }
-  if (only) slots = slots.slice(0, 1);
 
   if (engine === 'v0') return runV0(slots);
 
   if (engine !== 'builtin') {
-    progress('Designing the UI screens',
-             'Writing all ' + slots.length + ' screens, rendering them once '
-             + 'and cutting each one out. About a minute.', 25, 70);
+    dlgScreens.close();
+    v0Chip('designing ' + slots.length + ' screens');
+    toast('Building ' + slots.length + ' screen(s) in the background. Carry on '
+        + 'editing; they will appear when they are ready.');
     try {
       const r = await api('/api/auto-screens', {data: data(), brief: {}, engine,
+                          proposal_id: pid || '',
                           slot_ids: slots.map(s => s.id)});
       doc.screen_sources = Object.assign(doc.screen_sources || {},
                                          r.sources || {});
-      progressDone();
+      await absorbScreens(r);
+      v0Chip('');
       if ((r.errors||[]).length && !r.count)
-        return toast('v0 failed: ' + r.errors[0], 'err');
-      doc.screens = Object.assign(doc.screens||{}, r.screens||{});
-      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
-      persist(); drawScreenList(); schedulePreview();
+        return toast('Screens failed: ' + r.errors[0], 'err');
+      await absorbScreens(r);
+      drawScreenList(); schedulePreview();
       return toast(r.count + ' screens attached'
-                 + (r.batched ? ' from a single v0 build.' : '.'));
-    } catch (e) { progressDone(); return toast(e.message, 'err'); }
+                 + (r.batched ? ' from a single build.' : '.'));
+    } catch (e) { v0Chip(''); return toast(e.message, 'err'); }
   }
 
-  // the built-in renderer is fast, so it runs one at a time with real progress
+  // the built-in renderer takes a second or two per screen
+  dlgScreens.close();
   const perScreen = 4;
   const started = Date.now();
   const failures = [];
   doc.screens = doc.screens || {};
   for (let i = 0; i < slots.length; i++) {
-    const elapsed = (Date.now() - started) / 1000;
-    const rate = i ? elapsed / i : perScreen;
-    progress('Building the UI screens',
-             'Screen ' + (i+1) + ' of ' + slots.length + ' \u00b7 ' + slots[i].title,
-             (i / slots.length) * 100, Math.round(rate * (slots.length - i)));
+    v0Chip('screen ' + (i+1) + ' of ' + slots.length);
     try {
       const r = await api('/api/auto-screens', {data: data(), brief: {},
-                          engine, slot_ids: [slots[i].id]});
+                          engine, proposal_id: pid || '',
+                          slot_ids: [slots[i].id]});
       doc.screen_sources = Object.assign(doc.screen_sources || {},
                                          r.sources || {});
+      await absorbScreens(r);
       if ((r.errors||[]).length) failures.push(...r.errors);
       Object.assign(doc.screens, r.screens || {});
       screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
       persist(); drawScreenList(); schedulePreview();
     } catch (e) { failures.push(slots[i].id + ': ' + e.message); }
   }
-  progressDone();
-  const made = Object.keys(doc.screens).length;
+  v0Chip('');
+  const made = Object.keys(doc.screens || {}).length;
   if (failures.length)
     toast(failures.length + ' screen(s) failed. ' + failures[0], 'err');
   else toast(made + ' screen' + (made>1?'s':'') + ' attached.');
@@ -1621,10 +1676,10 @@ function watchV0(){
   v0Timer = setTimeout(async () => {
     try {
       const s = await api('/api/screens/v0-poll',
-                          {data: data(), chat_id, slot_ids});
+                          {data: Object.assign({}, data(), {_proposal_id: pid}),
+                           chat_id, slot_ids});
       if (s.ready) {
-        doc.screens = Object.assign(doc.screens || {}, s.screens || {});
-        screenSlots().forEach(x => { if ((s.screens || {})[x.id]) x.set(x.id); });
+        await absorbScreens(s);
         delete doc.v0job; persist(); drawScreenList(); schedulePreview();
         v0Chip('');
         return toast(s.count + ' screens arrived from v0 and are in place.');
@@ -1634,57 +1689,41 @@ function watchV0(){
   }, 20000);
 }
 
-$('#btnAutoScreens').onclick = () => {
-  if (Object.keys(doc.screens || {}).length &&
-      !confirm('This replaces every screen, including the ones already there. '
-             + 'Use "Fill missing screens" to keep them.')) return;
-  runScreens(false, 'all');
+$('#btnGenScreens').onclick = () => runScreens('fill');
+$('#btnScratch').onclick = () => {
+  if (!confirm('Build every screen again from scratch? The ones you already '
+             + 'have will be replaced, and this spends credits on all of them.'))
+    return;
+  runScreens('scratch');
 };
-$('#btnFillMissing').onclick = () => runScreens(false, 'missing');
-$('#btnOneScreen').onclick = () => runScreens(true, 'missing');
+$('#btnPickBuild').onclick = () => {
+  const nums = ($('#pickNumbers').value || '').split(/[^0-9]+/)
+                 .map(n => parseInt(n, 10)).filter(n => n > 0);
+  if (!nums.length) return toast('Give the numbers of the screens to build, '
+                               + 'for example 2, 5.', 'err');
+  runScreens('pick', nums);
+};
 
-$('#btnRecover').onclick = async () => {
-  // slots we have a build URL for but no image: photograph them again, free
-  const missing = screenSlots().filter(s => !(doc.screens||{})[s.id]);
+// Builds that already exist at v0 are collected automatically before anything
+// new is started, so nothing is ever paid for twice.
+async function reclaimExisting(slots){
   const known = {};
-  missing.forEach(s => {
+  slots.forEach(s => {
     const src = (doc.screen_sources || {})[s.id];
-    if (src && src.url) known[s.id] = src;
+    if (src && src.url && !(doc.screens || {})[s.id]) known[s.id] = src;
   });
-  if (Object.keys(known).length) {
-    progress('Fetching screens already built',
-             'Photographing ' + Object.keys(known).length + ' build(s) again. '
-             + 'No rebuild, no credits.', 40, 25);
-    try {
-      const r = await api('/api/screens-recover', {sources: known});
-      progressDone();
-      doc.screens = Object.assign(doc.screens || {}, r.screens || {});
-      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
-      persist(); drawScreenList(); schedulePreview();
-      if (r.count) return toast(r.count + ' screen(s) recovered without rebuilding.');
-    } catch (e) { progressDone(); }
-  }
-  // otherwise offer whatever is sitting in the v0 account
+  if (!Object.keys(known).length) return [];
   try {
-    const r = await (await fetch('/api/v0-chats')).json();
-    const chats = (r.chats || []).filter(x => x.url);
-    if (!chats.length)
-      return toast('Nothing in v0 to reclaim. Use Fill missing screens.', 'err');
-    const which = prompt('Builds in your v0 account:\n\n'
-      + chats.map((x, i) => (i+1) + '. ' + (x.name || x.id)).join('\n')
-      + '\n\nWhich number should fill "' + (missing[0] || {}).label + '"?');
-    const pick = chats[parseInt(which, 10) - 1];
-    if (!pick || !missing.length) return;
-    progress('Fetching that build', pick.name || pick.id, 50, 20);
-    const got = await api('/api/screens-recover',
-      {sources: {[missing[0].id]: {url: pick.url, device: 'phone'}}});
-    progressDone();
-    doc.screens = Object.assign(doc.screens || {}, got.screens || {});
-    missing[0].set(missing[0].id);
-    persist(); drawScreenList(); schedulePreview();
-    toast('Screen fetched from v0.');
-  } catch (e) { progressDone(); toast(e.message, 'err'); }
-};
+    const r = await api('/api/screens-recover', {sources: known});
+    if (r.count) {
+      await absorbScreens({screens: r.screens || {}});
+      drawScreenList(); schedulePreview();
+      toast(r.count + ' screen(s) recovered from an earlier build, at no cost.');
+    }
+    return Object.keys(r.screens || {});
+  } catch (e) { return []; }
+}
+
 $('#btnTestKeys').onclick = async () => {
   try {
     const r = await (await fetch('/api/test-keys')).json();
@@ -2071,6 +2110,7 @@ async function openProposal(id){
                      data: j.data}],
          shares: [], notes: [], screens: j.screens || {}, dirty: false};
   page = 0; sel = null; listView = null; redoStack = [];
+  await loadScreenIndex();
   $('#gate').style.display = 'none';
   $('#appShell').style.display = 'grid';
   refreshAll();

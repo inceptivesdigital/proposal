@@ -8,6 +8,7 @@ import base64
 import io
 import json
 import os
+import tempfile
 import sys
 import tempfile
 
@@ -35,6 +36,7 @@ from renderer import usage as USAGE              # noqa: E402
 from renderer import mailer as MAIL               # noqa: E402
 from renderer import sql as SQL                   # noqa: E402
 from renderer import documents as DOCS            # noqa: E402
+from renderer import screenstore as SCREENS       # noqa: E402
 from renderer.model import CURRENCIES             # noqa: E402
 
 PUBLIC = os.path.join(ROOT, "public")
@@ -72,6 +74,19 @@ async def security_headers(request, call_next):
 
 
 # ------------------------------------------------------------------ helpers
+SCREEN_CACHE = os.path.join(tempfile.gettempdir(), "proposal_screens")
+
+
+def screens_for(proposal_id, payload=None):
+    """Screens come from storage. A small inline set is still accepted, for
+    anything not yet saved to a proposal."""
+    if proposal_id:
+        got = SCREENS.to_files(proposal_id, SCREEN_CACHE)
+        if got:
+            return got
+    return screens_from(payload or {})
+
+
 def screens_from(payload):
     """Screens arrive as data URLs from the browser; write them to /tmp."""
     out = {}
@@ -95,11 +110,19 @@ def render_pdf(data, screens, only=None):
 
 # ------------------------------------------------------------------- models
 class RenderIn(BaseModel):
+    proposal_id: str = ""
     data: dict
     screens_data: dict = {}
 
 
+class ScreenIn(BaseModel):
+    proposal_id: str
+    slot: str
+    data: str = ""
+
+
 class PreviewIn(BaseModel):
+    proposal_id: str = ""
     data: dict
     page: int = 0
     scale: float = 1.5
@@ -147,6 +170,7 @@ class ScreensPdfIn(BaseModel):
 
 class AutoScreensIn(BaseModel):
     data: dict
+    proposal_id: str = ""
     brief: dict = {}
     engine: str = "auto"        # auto | builtin | v0 | fast | none
     only_first: bool = False    # generate one screen, for testing
@@ -230,8 +254,26 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.14-background-v0"
+BUILD = "2026-08-29.17-screen-flow"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
+
+
+def _deliver_screens(slots, pngs, proposal_id, engine):
+    """Store what was generated and hand back names, not megabytes of image."""
+    stored, inline = [], {}
+    for slot, png in zip(slots, pngs):
+        url = "data:image/png;base64," + base64.b64encode(png).decode()
+        if proposal_id:
+            try:
+                SCREENS.put(proposal_id, slot["id"], url)
+                stored.append(slot["id"])
+                continue
+            except Exception:                                 # noqa: BLE001
+                pass
+        inline[slot["id"]] = url
+    return {"stored": stored, "screens": inline,
+            "count": len(stored) + len(inline), "engine": engine,
+            "errors": [], "batched": True}
 
 
 def _dependency_check():
@@ -293,6 +335,13 @@ def asset(name: str):
     return FileResponse(path, headers={"cache-control": "public, max-age=86400"})
 
 
+@app.get("/admin")
+def admin_page():
+    """The admin view is its own window, not a dialog over the editor."""
+    return FileResponse(os.path.join(PUBLIC, "admin.html"),
+                        headers={"cache-control": "no-store"})
+
+
 @app.get("/sample.json")
 def sample():
     path = os.path.join(PUBLIC, "sample.json")
@@ -337,7 +386,9 @@ def health():
 @app.post("/api/render")
 def api_render(body: RenderIn):
     try:
-        pdf, meta = render_pdf(body.data, screens_from(body.screens_data))
+        pdf, meta = render_pdf(body.data,
+                               screens_for(body.proposal_id,
+                                           body.screens_data))
     except Exception as exc:                                  # noqa: BLE001
         raise HTTPException(400, str(exc))
     name = (body.data.get("meta", {}).get("project_name") or "proposal")
@@ -387,7 +438,8 @@ def api_outline(body: OutlineIn):
 def api_preview(body: PreviewIn):
     try:
         # render only the requested page, so typing stays responsive
-        pdf, meta = render_pdf(body.data, screens_from(body.screens_data),
+        pdf, meta = render_pdf(body.data,
+                               screens_for(body.proposal_id, body.screens_data),
                                only=body.page)
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(io.BytesIO(pdf))
@@ -553,6 +605,41 @@ def api_v0_chats():
         raise HTTPException(400, str(exc))
 
 
+@app.post("/api/screens/put")
+def api_screen_put(body: ScreenIn, session: str = Cookie(None)):
+    """Upload one screen. One image per request keeps every request small."""
+    me(session)
+    try:
+        return SCREENS.put(body.proposal_id, body.slot, body.data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/screens/{proposal_id}/{slot}")
+def api_screen_get(proposal_id: str, slot: str):
+    """Serve a stored screen, so the browser never holds the image data."""
+    got = SCREENS.get(proposal_id, slot)
+    if not got:
+        raise HTTPException(404, "No such screen.")
+    mime, blob = got
+    from fastapi.responses import Response as RawResponse
+    return RawResponse(content=blob, media_type=mime,
+                       headers={"cache-control": "private, max-age=600"})
+
+
+@app.get("/api/screens/list/{proposal_id}")
+def api_screen_list(proposal_id: str, session: str = Cookie(None)):
+    me(session)
+    return {"screens": SCREENS.listing(proposal_id)}
+
+
+@app.delete("/api/screens/{proposal_id}/{slot}")
+def api_screen_delete(proposal_id: str, slot: str, session: str = Cookie(None)):
+    me(session)
+    SCREENS.delete(proposal_id, slot)
+    return {"ok": True}
+
+
 @app.post("/api/screens/v0-start")
 def api_v0_start(body: V0StartIn, session: str = Cookie(None)):
     """Start a v0 build and return at once. Nothing here waits."""
@@ -595,8 +682,18 @@ def api_v0_poll(body: V0PollIn, session: str = Cookie(None)):
     for slot, png in zip(slots, out["images"]):
         screens[slot["id"]] = ("data:image/png;base64," +
                                base64.b64encode(png).decode())
-    return {"ready": True, "screens": screens, "count": len(screens),
-            "url": out.get("url")}
+    stored = []
+    if body.data.get("_proposal_id"):
+        pid = body.data["_proposal_id"]
+        for slot_id, url in list(screens.items()):
+            try:
+                SCREENS.put(pid, slot_id, url)
+                stored.append(slot_id)
+                screens.pop(slot_id)
+            except Exception:                                 # noqa: BLE001
+                pass
+    return {"ready": True, "screens": screens, "stored": stored,
+            "count": len(stored) + len(screens), "url": out.get("url")}
 
 
 @app.post("/api/screens-recover")
@@ -905,7 +1002,12 @@ def api_save(pid: str, body: SaveIn, session: str = Cookie(None)):
 def api_duplicate(pid: str, body: NameIn, session: str = Cookie(None)):
     u = me(session)
     try:
-        return {"id": DB.duplicate(pid, u["id"], body.name or None, u["name"])}
+        new_id = DB.duplicate(pid, u["id"], body.name or None, u["name"])
+        try:
+            SCREENS.copy_to(pid, new_id)
+        except Exception:                                     # noqa: BLE001
+            pass
+        return {"id": new_id}
     except KeyError as exc:
         raise HTTPException(404, str(exc))
 
@@ -944,6 +1046,10 @@ def api_publish(pid: str, session: str = Cookie(None)):
 @app.delete("/api/proposals/{pid}")
 def api_delete(pid: str, session: str = Cookie(None)):
     DB.delete(pid, me(session)["id"])
+    try:
+        SCREENS.delete(pid)
+    except Exception:                                         # noqa: BLE001
+        pass
     return {"ok": True}
 
 

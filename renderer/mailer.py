@@ -26,7 +26,11 @@ def _clean(value):
 HOST = _clean(os.environ.get("SMTP_HOST", ""))
 PORT = int(_clean(os.environ.get("SMTP_PORT", "587")) or 587)
 USER = _clean(os.environ.get("SMTP_USER", ""))
-PASSWORD = os.environ.get("SMTP_PASSWORD", "").strip()   # never normalised
+# Google shows an app password as four blocks of four. Those spaces are for
+# reading, and pasting them, especially as non-breaking spaces, breaks the login.
+PASSWORD = re.sub(r"\s+", "",
+                  unicodedata.normalize("NFKC",
+                                        os.environ.get("SMTP_PASSWORD", "")))
 SENDER = _clean(os.environ.get("SMTP_FROM", "")) or USER or \
     "no-reply@inceptivesdigital.com"
 SENDER_NAME = _clean(os.environ.get("SMTP_FROM_NAME",
@@ -40,6 +44,16 @@ def configured():
     return bool(HOST and USER and PASSWORD)
 
 
+def _non_ascii(label, raw):
+    """Name the setting and the position, so nobody has to guess again."""
+    out = []
+    for i, ch in enumerate(raw or ""):
+        if ord(ch) > 127:
+            out.append("%s contains %s at position %d"
+                       % (label, unicodedata.name(ch, repr(ch)), i))
+    return out
+
+
 def check():
     """What is configured, and whether anything looks wrong with it."""
     problems = []
@@ -49,9 +63,17 @@ def check():
             problems.append("%s is not set" % label)
     if SENDER and "@" not in SENDER:
         problems.append("SMTP_FROM is not an email address")
+    # check the raw values, before cleaning, so the source of a bad character
+    # is visible even though the code now copes with it
+    for label in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
+                  "SMTP_FROM_NAME"):
+        problems += _non_ascii(label, os.environ.get(label, ""))
+    if PASSWORD and len(PASSWORD) != 16:
+        problems.append("SMTP_PASSWORD is %d characters. A Google app password "
+                        "is 16 with no spaces." % len(PASSWORD))
     return {"configured": configured(), "host": HOST, "port": PORT,
             "sender": SENDER, "sender_name": SENDER_NAME,
-            "problems": problems}
+            "password_length": len(PASSWORD), "problems": problems}
 
 
 def send_code(to_email, code, purpose="verify your email"):
@@ -79,6 +101,11 @@ def send_code(to_email, code, purpose="verify your email"):
     context = ssl.create_default_context()
     try:
         return _deliver(msg, context)
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            "One of the SMTP settings contains a character that cannot be sent "
+            "over SMTP, usually a non-breaking space pasted from a browser. "
+            "Check /api/health, which now names the setting. (%s)" % exc)
     except smtplib.SMTPAuthenticationError:
         raise RuntimeError(
             "The mail server refused the login. For Google Workspace this must "

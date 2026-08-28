@@ -187,7 +187,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.7-mail-fix"
+BUILD = "2026-08-29.8-password-clean"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -269,8 +269,8 @@ def health():
     return {
         "ok": True,
         "build": BUILD,
-        "database": SQL.backend(),
         "database_reachable": SQL.ping()[0],
+        "database": SQL.backend(),
         "db_driver": SQL.DRIVER[0] or "not loaded",
         "dependencies": _dependency_check(),
         "tables": SQL.table_check(),

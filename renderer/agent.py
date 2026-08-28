@@ -36,11 +36,27 @@ Operations:
     "intro":"one or two sentences","columns":2,
     "cards":[{"title":"...","body":"one or two sentences","icon":"ic_shield"}]}}
  {"op":"delete_page","index":0}               remove a page you created
+ {"op":"duplicate_page","index":0}            copy a page you created
+ {"op":"move_page","from":2,"to":0}           reorder the pages you created
+ {"op":"move","path":"page10.services","value":1,"index":4}
+                                              move item 4 to position 1 in a list
+ {"op":"icon","path":"page4.cards.0","value":"ic_shield"}   change one icon
+ {"op":"currency","value":"AED"}              price the milestones in another
+                                              currency (USD GBP EUR AUD CAD SGD
+                                              AED SAR THB MYR)
+ {"op":"rewrite","paths":["page4.cards.0.body","page4.cards.1.body"],
+  "values":["...","..."]}                     change several fields at once,
+                                              for a change of tone or length
  {"op":"no_screens","value":true}             remove every UI mockup from the
                                               whole proposal (or false to keep)
  {"op":"clear_screen","page":"core_pages.0"}  remove the mockups from one page
  {"op":"clean_area","page":"page4",
   "region":{"x":300,"y":300,"w":280,"h":240},"mode":"clean"}
+                                              modes: "clean" rebuilds the area
+                                              from the page's own colours,
+                                              "smooth" blurs it away, "lighten"
+                                              fades it towards white, "flatten"
+                                              fills it with one flat colour
                                               repair the page artwork inside a
                                               rectangle: use this when someone
                                               marks a blurred, smudged or
@@ -81,6 +97,22 @@ page does not exist without checking that list.
 Spacing and density ARE things you can change, with the spacing operation. Do
 not tell the user to pass it to a designer.
 
+WHAT YOU CAN SEE. When the user marks an area, you are given two pictures: the
+whole page, and a close crop of exactly what they marked. Look at them. Judge
+what is actually there: is the text overlapping, is the spacing tight, is the
+background smudged, is a card empty, is an image missing. Say what you can see
+in the note, so the user knows you looked. If the pictures show the problem is
+already fixed, say so and make no operation rather than changing something at
+random.
+
+You have real reach over a marked area. When "pointing_at" carries a region and
+no text fields, the comment is about the artwork: use clean_area with the mode
+that matches what was asked.
+ - "blurred", "smudged", "messy", "weird" -> mode "clean"
+ - "too busy", "distracting", "remove the pattern" -> mode "smooth"
+ - "too dark", "too heavy", "lighten it" -> mode "lighten"
+ - "make it plain", "solid colour", "flat" -> mode "flatten"
+
 You CAN repair the artwork. If a comment is about the page background rather
 than the words — a blurred patch, a smudge, a leftover shape, an area that
 looks wrong — use clean_area on the region the user marked. That is a design
@@ -90,8 +122,9 @@ covers it, and never report a change you did not make.
 The one thing outside your reach is redesigning the page: you cannot move the
 logo, restyle the waves or change the brand colours.
 
-"uploaded_images" lists images the user has attached. Use place_image with one
-of those ids when they ask for an image to go on a page.
+"uploaded_images" lists images the user has attached, and you are shown them.
+Describe what is in one before placing it, so the user knows you looked. Use
+place_image with its id when they ask for it to go on a page.
 
 Rules:
 - Never touch prices, client details or the page 14 legal statements. If asked, \
@@ -101,12 +134,20 @@ eyebrow naming the section. Keep card bodies to one or two sentences.
 - Match the house voice: plain, confident, no hype, no em-dashes.
 - Icons only from the supplied list.
 - Change only what was asked. Do not tidy anything else.
+- You may combine operations in one reply: repair an area and reword the text
+  beside it, for example.
+- If a comment names a page but no region, and it is about layout, use spacing.
+  If it is about a mockup, use clean_background or no_screens.
 - "house_preferences" are things this team has asked for repeatedly on other
   proposals. Apply one only if the instruction is consistent with it, and say
   in the note that you did.
 
-Reply with {"ops":[...],"note":"one short sentence on what you did"} and \
-nothing else."""
+If the instruction is a QUESTION rather than a change, answer it and make no \
+operations. Read what you were given and reply with specifics: numbers, page \
+numbers, the actual wording. Do not invent anything that is not in front of you.
+
+Reply with {"ops":[...],"note":"one short sentence on what you did",\
+"answer":"your reply, if the user asked a question"} and nothing else."""
 
 
 KEY_FOR_NAME = {
@@ -116,6 +157,38 @@ KEY_FOR_NAME = {
     "Milestones & Investment": "page12", "Deliverables": "page13",
     "Terms & Protection": "page14", "Next Steps & Signatures": "page15",
 }
+
+
+def _call_with_images(client, system, payload, images, max_tokens, model):
+    """The same call as _call, with pictures attached."""
+    from .extract import _parse_json, _meter
+    content = []
+    for img in images[:4]:
+        content.append({"type": "image",
+                        "source": {"type": "base64",
+                                   "media_type": img.get("media_type", "image/png"),
+                                   "data": img["data"]}})
+        if img.get("caption"):
+            content.append({"type": "text", "text": img["caption"]})
+    content.append({"type": "text", "text": payload})
+    try:
+        msg = client.messages.create(model=model, max_tokens=max_tokens,
+                                     system=system,
+                                     messages=[{"role": "user",
+                                                "content": content}])
+    except Exception as exc:                                  # noqa: BLE001
+        raise RuntimeError("The assistant could not be reached using model "
+                           "%r: %s" % (model, exc))
+    _meter(msg, model, "assistant")
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        raise RuntimeError("The assistant ran out of room. Ask for one change "
+                           "at a time.")
+    try:
+        return _parse_json(text)
+    except ValueError as exc:
+        raise RuntimeError("The assistant did not return valid JSON (%s). It "
+                           "began: %s" % (exc, text[:200].replace("\n", " ")))
 
 
 def summarise(data):
@@ -163,17 +236,71 @@ def is_locked(path):
         or path.endswith(".amount")
 
 
-def chat(data, instruction, client=None, context=None):
+def pages_mentioned(data, instruction, context=None):
+    """Which pages this instruction is about, so their full content can be sent.
+
+    Without this the assistant only ever saw headings, and had to guess at what
+    it was rewriting."""
+    keys = []
+    if context and context.get("page_key"):
+        keys.append(context["page_key"])
+    for n in re.findall(r"page\s*(\d{1,2})", (instruction or "").lower()):
+        entry = next((p for p in summarise(data)["pages"]
+                      if p["page_number"] == int(n)), None)
+        if entry:
+            keys.append(entry["key"])
+    low = (instruction or "").lower()
+    for word, key in (("differentiator", "page4"), ("cover", "page1"),
+                      ("overview", "page3"), ("marketing", "page9"),
+                      ("technical", "page10"), ("stack", "page10"),
+                      ("milestone", "page12"), ("timeline", "page12"),
+                      ("deliverable", "page13"), ("terms", "page14"),
+                      ("signature", "page15"), ("next steps", "page15")):
+        if word in low:
+            keys.append(key)
+    out, seen = {}, set()
+    for key in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        node = data.get(key) if key.startswith("page") else None
+        if node is None and key.startswith("core_pages."):
+            idx = int(key.split(".")[1])
+            pages = data.get("core_pages") or []
+            node = pages[idx] if idx < len(pages) else None
+        if node is None and key.startswith("custom_pages."):
+            idx = int(key.split(".")[1])
+            pages = data.get("custom_pages") or []
+            node = pages[idx] if idx < len(pages) else None
+        if isinstance(node, dict):
+            out[key] = node
+        if len(out) >= 3:
+            break
+    return out
+
+
+def chat(data, instruction, client=None, context=None, history=None,
+         images=None):
+    """images: a list of {"media_type","data"} for the assistant to look at.
+
+    The marked area is rendered and passed as a picture, so a comment about how
+    something looks is judged by looking at it rather than inferred from a
+    rectangle's coordinates."""
     """context describes where the user pointed: which page, which fields sit
     under the mark, and what they currently say. With that, "make this shorter"
     is unambiguous."""
-    payload = json.dumps({"proposal": summarise(data),
-                          "instruction": instruction,
-                          "pointing_at": context or None,
-                          "uploaded_images": (context or {}).get("images") or [],
-                          "house_preferences": (context or {}).get("preferences") or [],
-                          "allowed_icons": ICON_NAMES}, ensure_ascii=False)
-    out = _call(_client(client), SYSTEM, payload, 3000, model=MODEL)
+    payload = json.dumps({
+        "proposal": summarise(data),
+        "instruction": instruction,
+        "recent_exchange": (history or [])[-4:],
+        "pages_in_question": pages_mentioned(data, instruction, context),
+        "pointing_at": context or None,
+        "uploaded_images": (context or {}).get("images") or [],
+        "house_preferences": (context or {}).get("preferences") or [],
+        "currency": (data.get("meta") or {}).get("currency", "USD"),
+        "allowed_icons": ICON_NAMES}, ensure_ascii=False)
+    out = _call_with_images(_client(client), SYSTEM, payload, images or [],
+                            6000, MODEL)
     ops = [o for o in (out.get("ops") or []) if isinstance(o, dict)]
     kept, refused = [], []
     for o in ops:
@@ -181,12 +308,24 @@ def chat(data, instruction, client=None, context=None):
         if path and is_locked(path):
             refused.append(path)
             continue
+        if o.get("op") == "rewrite":
+            bad = [p for p in o.get("paths", []) if is_locked(p)]
+            if bad:
+                refused.extend(bad)
+                keep = [(p, v) for p, v in zip(o.get("paths", []),
+                                               o.get("values", []))
+                        if not is_locked(p)]
+                if not keep:
+                    continue
+                o = {"op": "rewrite", "paths": [p for p, _ in keep],
+                     "values": [v for _, v in keep]}
         kept.append(o)
     note = out.get("note", "")
+    answer = out.get("answer", "")
     if refused:
         note += (" Left alone: %s, which are typed or contractual."
                  % ", ".join(sorted(set(refused))))
-    return {"ops": kept, "note": note.strip()}
+    return {"ops": kept, "note": note.strip(), "answer": answer.strip()}
 
 
 PLATE_FOR_KEY = {"page1": 1, "page2": 2, "page3": 3, "page4": 4, "page9": 9,
@@ -216,6 +355,33 @@ def apply_ops(data, ops):
             elif kind == "show":
                 data["hidden"] = [p for p in (data.get("hidden") or [])
                                   if p != o.get("page")]
+            elif kind == "duplicate_page":
+                pages = data.get("custom_pages") or []
+                idx = int(o.get("index", -1))
+                if 0 <= idx < len(pages):
+                    pages.insert(idx + 1, json.loads(json.dumps(pages[idx])))
+            elif kind == "move_page":
+                pages = data.get("custom_pages") or []
+                a, b = int(o.get("from", -1)), int(o.get("to", -1))
+                if 0 <= a < len(pages) and 0 <= b < len(pages):
+                    pages.insert(b, pages.pop(a))
+            elif kind == "icon":
+                node = _resolve(data, o["path"])
+                if isinstance(node, dict):
+                    node["icon"] = o.get("value", "ic_home")
+            elif kind == "currency":
+                code = str(o.get("value", "")).upper()
+                from .model import CURRENCIES
+                if code in CURRENCIES:
+                    data.setdefault("meta", {})["currency"] = code
+            elif kind == "rewrite":
+                for path, value in zip(o.get("paths", []), o.get("values", [])):
+                    if is_locked(path):
+                        continue
+                    try:
+                        _mutate(data, {"op": "set", "path": path, "value": value})
+                    except Exception:                         # noqa: BLE001
+                        continue
             elif kind == "clean_area":
                 region = o.get("region") or {}
                 if region.get("w") and region.get("h"):
@@ -260,6 +426,13 @@ def apply_ops(data, ops):
         except Exception:                                     # noqa: BLE001
             continue
     return applied
+
+
+def _resolve(data, path):
+    node = data
+    for key in parse(path):
+        node = node[key]
+    return node
 
 
 def _mutate(data, o):

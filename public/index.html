@@ -908,8 +908,12 @@ function drawNotes(){
         undo.onclick = ev => {
           ev.stopPropagation();
           const redo = JSON.parse(JSON.stringify(data()));
-          commit(d => Object.assign(d, JSON.parse(JSON.stringify(n.before))),
-                 'undid comment: ' + n.body.slice(0, 40));
+          // replace the document rather than merging, or keys the change added
+          // survive the undo
+          commit(d => {
+            Object.keys(d).forEach(k => delete d[k]);
+            Object.assign(d, JSON.parse(JSON.stringify(n.before)));
+          }, 'undid comment: ' + n.body.slice(0, 40));
           n.done = false; n.redo = redo; delete n.before;
           persist(); drawNotes(); drawPins();
           toast('That comment has been undone.');
@@ -923,8 +927,10 @@ function drawNotes(){
         redo.onclick = ev => {
           ev.stopPropagation();
           const before = JSON.parse(JSON.stringify(data()));
-          commit(d => Object.assign(d, JSON.parse(JSON.stringify(n.redo))),
-                 'redid comment: ' + n.body.slice(0, 40));
+          commit(d => {
+            Object.keys(d).forEach(k => delete d[k]);
+            Object.assign(d, JSON.parse(JSON.stringify(n.redo)));
+          }, 'redid comment: ' + n.body.slice(0, 40));
           n.done = true; n.before = before; delete n.redo;
           persist(); drawNotes(); drawPins();
         };
@@ -1900,6 +1906,7 @@ async function runNote(i){
   // remember where we were, so this one change can be undone on its own
   const before = JSON.parse(JSON.stringify(data()));
   const fields = fieldsUnder(n);
+  // the server renders the marked area and shows it to the assistant
   const ctx = {page_number: n.page + 1,
                page_title: (outline[n.page] || {}).name || '',
                page_key: (outline[n.page] || {}).key || '',
@@ -1920,7 +1927,9 @@ async function runNote(i){
     n.done = true;
     n.before = before;                 // one-click undo for this comment alone
     n.ranAt = stamp();
-    commit(d => Object.assign(d, r.data), 'comment: ' + n.body.slice(0, 50));
+    commit(d => { Object.keys(d).forEach(k => delete d[k]);
+                  Object.assign(d, r.data); },
+           'comment: ' + n.body.slice(0, 50));
     toast(r.note || 'Change applied.');
   } catch (e) { progressDone(); toast(e.message, 'err'); }
 }
@@ -2132,12 +2141,15 @@ $('#btnNewFromList').onclick = () => {
 };
 
 // -------------------------------------------------------------- assistant
-const IDEAS = ['Delete the UI screens from the whole proposal',
-               'Add a page about security and compliance',
-               'Remove the marketing page',
-               'Make the differentiator sharper',
-               'Add an integration for calendar sync',
-               'Shorten the app overview'];
+const IDEAS = [
+  'What does this proposal say we will build?',
+  'Make every card on page 4 shorter and sharper',
+  'Add a page about security and compliance',
+  'Price it in AED instead',
+  'Reorder the integrations so payments comes first',
+  'Delete the UI screens from the whole proposal',
+  'Remove the marketing page',
+  'Open up the spacing on page 10'];
 function drawIdeas(){
   const host = $('#chatIdeas'); host.innerHTML = '';
   IDEAS.forEach(t => {
@@ -2240,10 +2252,13 @@ async function drawPrefs(){
   } catch (e) { /* preferences are a nicety, never a blocker */ }
 }
 
+let chatHistory = [];
+
 $('#btnChat').onclick = async () => {
   const text = $('#chatText').value.trim();
   if (!text) return;
   chatSay('You', text);
+  chatHistory.push({role: 'user', text});
   $('#chatText').value = '';
   $('#btnChat').disabled = true;
   progress('The assistant is working',
@@ -2251,7 +2266,8 @@ $('#btnChat').onclick = async () => {
            + 'allowed to change it', 35, 20);
   try {
     const r = await api('/api/chat', {data: data(), instruction: text,
-                                      proposal_id: pid || '', images: chatImages});
+                                      proposal_id: pid || '', images: chatImages,
+                                      history: chatHistory.slice(-6)});
     progress('Applying the change', 'Redrawing the affected pages', 85, 4);
     if (r.rule && r.rule.is_rule)
       chatSay('Assistant', 'Learned. Your team has corrected this on '
@@ -2260,10 +2276,17 @@ $('#btnChat').onclick = async () => {
     else if (r.learned && r.learned.is_preference)
       chatSay('Assistant', 'Noted. You have asked for this on '
             + r.learned.seen + ' proposals, so I will offer it next time.');
-    if (!r.applied) chatSay('Assistant', r.note || 'Nothing was changed.', 'err');
+    if (r.answer && !r.applied) {
+      chatSay('Assistant', r.answer);
+      chatHistory.push({role: 'assistant', text: r.answer});
+    }
+    else if (!r.applied) chatSay('Assistant', r.note || 'Nothing was changed.', 'err');
     else {
+      chatHistory.push({role: 'assistant', text: r.note || 'changed'});
       chatSay('Assistant', r.note || (r.applied + ' change(s) made.'));
-      commit(d => Object.assign(d, r.data), 'assistant: ' + text.slice(0, 60));
+      commit(d => { Object.keys(d).forEach(k => delete d[k]);
+                    Object.assign(d, r.data); },
+             'assistant: ' + text.slice(0, 60));
     }
   } catch (e) { chatSay('Assistant', e.message, 'err'); }
   progressDone();

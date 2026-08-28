@@ -245,6 +245,7 @@ class ChatIn(BaseModel):
     context: dict = {}
     proposal_id: str = ""
     images: dict = {}          # id -> data URL, attached in the chat
+    history: list = []         # the last few turns, so it follows a thread
 
 
 class EditIn(BaseModel):
@@ -254,7 +255,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.19-static-paths"
+BUILD = "2026-08-29.22-assistant-sees"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -1137,8 +1138,20 @@ def api_chat(body: ChatIn, session: str = Cookie(None)):
                          for k in body.images]
     if user:
         ctx["preferences"] = [p["text"] for p in LEARN.preferences(user["id"])]
+    look = _pictures_for(body.data, ctx, body.proposal_id)
+    # anything the user attached in the chat is shown to the assistant as well
+    for name, url in list(body.images.items())[:2]:
+        try:
+            head, _, raw = url.partition(",")
+            mime = head[5:head.index(";")] if ";" in head else "image/png"
+            look.append({"media_type": mime, "data": raw,
+                         "caption": "An image the user attached, id %s. Use "
+                                    "place_image to put it on a page." % name})
+        except Exception:                                     # noqa: BLE001
+            continue
     try:
-        out = AG.chat(body.data, body.instruction, context=ctx or None)
+        out = AG.chat(body.data, body.instruction, context=ctx or None,
+                      history=body.history, images=look)
     except Exception as exc:                                  # noqa: BLE001
         raise HTTPException(400, str(exc))
     data = json.loads(json.dumps(body.data))
@@ -1160,7 +1173,49 @@ def api_chat(body: ChatIn, session: str = Cookie(None)):
         DB.note_activity(user["id"], user["email"], "asked the assistant",
                          body.instruction[:160], body.proposal_id or "")
     return {"data": data, "applied": applied, "note": out["note"],
-            "ops": out["ops"], "learned": learned, "rule": rule}
+            "answer": out.get("answer", ""), "ops": out["ops"],
+            "learned": learned, "rule": rule}
+
+
+def _pictures_for(data, ctx, proposal_id, pad=26.0):
+    """The page the user marked, and a close crop of the mark itself."""
+    page_no = (ctx or {}).get("page_number")
+    if not page_no:
+        return []
+    index = int(page_no) - 1
+    try:
+        pdf, meta = render_pdf(data, screens_for(proposal_id), only=index)
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(io.BytesIO(pdf))
+        full = doc[0].render(scale=1.6).to_pil().convert("RGB")
+    except Exception:                                         # noqa: BLE001
+        return []
+
+    out = [_as_image(full, "The whole of page %s." % page_no, 1100)]
+    region = (ctx or {}).get("region") or {}
+    if region.get("w") and region.get("h"):
+        s = full.width / 595.2                    # pixels per point
+        x0 = max(int((region["x"] - pad) * s), 0)
+        y0 = max(int((841.92 - region["y"] - region["h"] - pad) * s), 0)
+        x1 = min(int((region["x"] + region["w"] + pad) * s), full.width)
+        y1 = min(int((841.92 - region["y"] + pad) * s), full.height)
+        if x1 - x0 > 12 and y1 - y0 > 12:
+            out.append(_as_image(full.crop((x0, y0, x1, y1)),
+                                 "A close crop of exactly the area the user "
+                                 "marked, with a little of its surroundings.",
+                                 900))
+    return out
+
+
+def _as_image(im, caption, longest):
+    """Scale down and encode, so the request stays small."""
+    if max(im.size) > longest:
+        ratio = longest / float(max(im.size))
+        im = im.resize((max(int(im.width*ratio), 1), max(int(im.height*ratio), 1)))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    return {"media_type": "image/png", "caption": caption,
+            "data": base64.b64encode(buf.getvalue()).decode()}
 
 
 def _at(data, path):

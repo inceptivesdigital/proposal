@@ -23,6 +23,9 @@ MODEL = os.environ.get("PROPOSAL_SCREEN_MODEL",
                        os.environ.get("PROPOSAL_MODEL", "claude-sonnet-5"))
 GAP = 48                       # px between screens in the strip
 MAX_TOKENS = int(os.environ.get("PROPOSAL_SCREEN_TOKENS", "16000"))
+# a full screen of HTML runs to roughly 2,500 tokens, so three per reply keeps
+# a comfortable margin inside the budget
+PER_CALL = int(os.environ.get("PROPOSAL_SCREENS_PER_CALL", "3"))
 
 SYSTEM = """You write the HTML for a row of app screens, to be photographed and
 placed in a sales proposal.
@@ -127,6 +130,7 @@ def resolve_photos(html):
 
 
 def make_html(slots, project_name, client=None):
+    """HTML for this batch of screens."""
     system = SYSTEM.replace("GAPpx", "%dpx" % GAP).replace("TOTALpx", "%dpx" %
         (sum(VIEWPORT.get(s.get("device", "phone"), VIEWPORT["phone"])[0]
              for s in slots) + GAP * (len(slots) + 1)))
@@ -143,9 +147,12 @@ def make_html(slots, project_name, client=None):
         pass
     text = "".join(b.text for b in msg.content if b.type == "text")
     if getattr(msg, "stop_reason", None) == "max_tokens":
-        raise RuntimeError("The screen HTML was cut off at %d tokens. Raise "
-                           "PROPOSAL_SCREEN_TOKENS or generate fewer screens "
-                           "at once." % MAX_TOKENS)
+        raise RuntimeError(
+            "The HTML for these %d screens was cut off at %d tokens. Lower "
+            "PROPOSAL_SCREENS_PER_CALL (currently %d) or raise "
+            "PROPOSAL_SCREEN_TOKENS."
+            % (len(slots) if isinstance(slots, list) else PER_CALL,
+               MAX_TOKENS, PER_CALL))
     return _extract_html(text)
 
 
@@ -225,13 +232,10 @@ def slice_strip(png, slots):
     return out
 
 
-def build(slots, project_name, client=None):
-    """All screens, start to finish. One model call plus one screenshot."""
-    if not configured():
-        raise RuntimeError("Fast screens need SCREENSHOT_PROVIDER and "
-                           "SCREENSHOT_API_KEY set on the server.")
+def build_one_strip(slots, project_name, client=None):
+    """One reply's worth of screens, rendered and cut up."""
     html = make_html(slots, project_name, client)
-    html, photos = resolve_photos(html)
+    html, _ = resolve_photos(html)
     total = sum(VIEWPORT.get(s.get("device", "phone"), VIEWPORT["phone"])[0]
                 for s in slots) + GAP * (len(slots) + 1)
     tall = max(VIEWPORT.get(s.get("device", "phone"), VIEWPORT["phone"])[1]
@@ -245,3 +249,17 @@ def build(slots, project_name, client=None):
     if len(png) < 6000:
         raise RuntimeError("The rendered strip came back almost empty.")
     return slice_strip(png, slots), html
+
+
+def build(slots, project_name, client=None):
+    """All screens. Written a few at a time, because a whole set of HTML does
+    not fit in one reply."""
+    if not configured():
+        raise RuntimeError("Fast screens need SCREENSHOT_PROVIDER and "
+                           "SCREENSHOT_API_KEY set on the server.")
+    images, last_html = [], ""
+    for i in range(0, len(slots), PER_CALL):
+        chunk = slots[i:i + PER_CALL]
+        pngs, last_html = build_one_strip(chunk, project_name, client)
+        images.extend(pngs)
+    return images, last_html

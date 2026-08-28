@@ -187,7 +187,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.5-pyproject-deps"
+BUILD = "2026-08-29.6-header-fix"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 

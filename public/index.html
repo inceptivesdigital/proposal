@@ -265,7 +265,9 @@
     <div class="btnwrap"><button id="btnSave">Save</button><span class="hint">Keep this version</span></div>
     <div class="btnwrap"><button id="btnPdf">Download PDF</button><span class="hint">Export the finished file</span></div>
     <div class="btnwrap"><button class="primary" id="btnPublish">Publish</button><span class="hint">Lock a version for the client</span></div>
-    <div class="avatar">HS</div>
+    <div class="btnwrap"><button id="btnCredits">API health</button><span class="hint">Check keys and credit</span></div>
+    <div class="btnwrap" id="adminWrap" style="display:none"><button id="btnAdmin">Admin</button><span class="hint">Usage, costs and people</span></div>
+    <div class="avatar" id="avatar">HS</div>
   </header>
 
   <div class="body">
@@ -454,6 +456,18 @@
   <button class="primary" id="btnRunRewrite">Rewrite with AI</button></footer></dialog>
 
 <script>
+// If anything throws while the page is wiring itself up, every handler after
+// that point is silently dead. Say so rather than leaving dead buttons.
+window.addEventListener('error', e => {
+  const box = document.getElementById('authMsg') || document.body;
+  const d = document.createElement('div');
+  d.className = 'banner warn';
+  d.textContent = 'The page failed to start: ' + (e.message || 'unknown error')
+                + '. Hard refresh with Cmd-Shift-R; if it persists, send this '
+                + 'message on.';
+  box.prepend ? box.prepend(d) : box.appendChild(d);
+});
+
 const $ = s => document.querySelector(s);
 const arr = v => Array.isArray(v) ? v : (v == null ? [] : [v]);
 const PT = 595.2, PTH = 841.92;

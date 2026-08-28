@@ -38,24 +38,45 @@ def page10(c, d):
 
     items = p["stack"]
     pitch = (ph - 2*PAD) / max(len(items), 1)
+    body_w = L["w"] - (L["text_x"]-L["x"]) - 16
+
+    # One size for the whole column, chosen so the tallest item still clears
+    # its neighbour. Without this a long body runs into the next heading.
+    tsize, bsize, lead = 11.6, 8.8, 11.0 * gap
+    room = pitch - 12                      # breathing space between items
+    while bsize > 6.6:
+        lead = bsize * 1.25 * gap
+        tallest = max([tsize + 4 + len(wrap(as_text(x.get("body")), "G-Light",
+                                            bsize, body_w)) * lead
+                       for x in items] or [0])
+        if tallest <= room:
+            break
+        bsize -= 0.2
+        if bsize < 7.6 and tsize > 9.6:
+            tsize -= 0.2                   # shrink the heading only at the end
+
     for i, it in enumerate(items):
         cy = py1 - PAD - pitch*(i + 0.5)
         tile(c, L["tile_cx"], cy)
         draw_icon(c, L["tile_cx"], cy, 20, ic(it.get("icon", "ic_code")),
                   ICON_BLUE, 1.7)
-        lead = 11.0 * gap
-        lines = wrap(it["body"], "G-Light", 8.8,
-                     L["w"] - (L["text_x"]-L["x"]) - 16)
-        blk = 11.6 + len(lines)*lead
-        ty = cy + blk/2 - 9.4
+        lines = wrap(as_text(it.get("body")), "G-Light", bsize, body_w)
+        max_lines = max(int((room - tsize - 4) / lead), 1)
+        if len(lines) > max_lines:
+            qa_note(0, "clipped",
+                    "technical stack item %d was too long for its row" % (i+1))
+            lines = lines[:max_lines]
+        blk = tsize + 4 + len(lines)*lead
+        ty = cy + blk/2 - tsize*0.8
         c.setFillColorRGB(*INK)
-        c.setFont("G-Med", 11.6)
-        c.drawString(L["text_x"], ty, it["title"])
-        map_field("page10.stack.%d.title" % i, L["text_x"], ty, 120, 14,
-                  11.6, "G-Med")
-        draw_lines(c, lines, L["text_x"], ty - 13.5 * gap, lead, "G-Light", 8.8,
-                   (0.30, 0.34, 0.41), path="page10.stack.%d.body" % i,
-                   maxw=L["w"] - (L["text_x"]-L["x"]) - 16)
+        c.setFont("G-Med", tsize)
+        c.drawString(L["text_x"], ty, fit_text(as_text(it.get("title")),
+                                               "G-Med", tsize, body_w))
+        map_field("page10.stack.%d.title" % i, L["text_x"], ty, body_w,
+                  tsize*1.2, tsize, "G-Med")
+        draw_lines(c, lines, L["text_x"], ty - (tsize + 3.2), lead, "G-Light",
+                   bsize, (0.30, 0.34, 0.41),
+                   path="page10.stack.%d.body" % i, maxw=body_w)
         if i:
             c.setStrokeColorRGB(0.90, 0.92, 0.95)
             c.setLineWidth(0.7)
@@ -80,14 +101,28 @@ def page10(c, d):
     svc = p["services"]
     sp = (ph - 2*PAD) / max(len(svc), 1)
     ch = min(sp - 7, 62)
+    # same treatment on the right: fit the longest service into its card
+    ssize, slead = 7.9, 9.4 * gap
+    while ssize > 6.2:
+        slead = ssize * 1.2 * gap
+        tallest = max([10.4 + 3 + len(wrap(as_text(x.get("body")), "G-Light",
+                                           ssize, R["card_w"]-24)) * slead
+                       for x in svc] or [0])
+        if tallest <= ch - 8:
+            break
+        ssize -= 0.15
     for i, s in enumerate(svc):
         cy = py1 - PAD - sp*(i + 0.5)
         soft_panel(c, R["card_x"], cy-ch/2, R["card_w"], ch, 9, (1, 1, 1), 0.07)
         tile(c, R["tile_cx"], cy, 15.5)
         draw_icon(c, R["tile_cx"], cy, 17.5, ic(s.get("icon", "ic_cloud")),
                   ICON_BLUE, 1.6)
-        slead = 9.4 * gap
-        lines = wrap(s["body"], "G-Light", 7.9, R["card_w"]-24)
+        lines = wrap(as_text(s.get("body")), "G-Light", ssize, R["card_w"]-24)
+        max_lines = max(int((ch - 18) / slead), 1)
+        if len(lines) > max_lines:
+            qa_note(0, "clipped",
+                    "integration %d was too long for its card" % (i+1))
+            lines = lines[:max_lines]
         ts = fit_one_line(s["title"], "G-Med", 10.4, R["card_w"]-24, floor=7.6)
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", ts)
@@ -95,7 +130,7 @@ def page10(c, d):
         map_field("page10.services.%d.title" % i, R["text_x"],
                   cy + 2.4 + (len(lines)-1)*4.6, R["card_w"]-24, 13, ts, "G-Med")
         draw_lines(c, lines, R["text_x"], cy - 8.4 * gap + (len(lines)-1)*4.6,
-                   slead, "G-Light", 7.9, (0.30, 0.34, 0.41),
+                   slead, "G-Light", ssize, (0.30, 0.34, 0.41),
                    path="page10.services.%d.body" % i, maxw=R["card_w"]-24)
 
     F = P10["foot"]

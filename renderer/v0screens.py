@@ -496,3 +496,41 @@ def refetch(url, device="phone"):
     if len(png) < 6000:
         raise RuntimeError("The screenshot of %s came back almost empty." % url)
     return png
+
+
+# ---------------------------------------------------------------------------
+# Asynchronous batch
+# ---------------------------------------------------------------------------
+# A v0 build can run for tens of minutes, which no HTTP request will survive.
+# Start it, hand back the chat id, and poll until the sandbox is serving.
+
+def start_batch(slots, project_name):
+    """Kick off the build and return at once."""
+    chat, url = create_chat(batch_prompt(slots, project_name))
+    _meter("v0_build", 1, "batch of %d started" % len(slots))
+    return {"chat_id": chat.get("id"), "url": url if is_public_preview(url) else None}
+
+
+def poll_batch(chat_id, slots, deploy_if_needed=True):
+    """Is it serving yet? If so, photograph and cut it up."""
+    out = _get("%s/chats/%s" % (V0_BASE, chat_id), _v0_headers())
+    chat = out.get("chat") or out.get("data") or out
+    url = _preview_of(chat)
+    if not is_public_preview(url):
+        if not deploy_if_needed:
+            return {"ready": False, "status": chat.get("status") or "building"}
+        try:
+            url = deploy(chat)
+        except Exception:                                     # noqa: BLE001
+            return {"ready": False, "status": "building"}
+    if not is_public_preview(url):
+        return {"ready": False, "status": "building"}
+    total_w = sum(VIEWPORT.get(s.get("device", "phone"), VIEWPORT["phone"])[0]
+                  for s in slots) + STRIP_GAP * (len(slots) + 1)
+    tall = max(VIEWPORT.get(s.get("device", "phone"), VIEWPORT["phone"])[1]
+               for s in slots) + STRIP_GAP * 2
+    png = shot_at(url, total_w, tall)
+    _meter("screenshot", 1, "batch strip")
+    if len(png) < 6000:
+        return {"ready": False, "status": "the page rendered empty, still building"}
+    return {"ready": True, "url": url, "images": slice_strip(png, slots)}

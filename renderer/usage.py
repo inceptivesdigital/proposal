@@ -101,7 +101,7 @@ def by_user():
         "COALESCE(SUM(x.cost),0) AS cost, "
         "COUNT(DISTINCT x.proposal_id) AS proposals "
         "FROM usage x LEFT JOIN users u ON u.id = x.user_id "
-        "GROUP BY x.user_id ORDER BY cost DESC")
+        "GROUP BY x.user_id, u.email, u.name ORDER BY cost DESC")
 
 
 def by_proposal(limit=50):
@@ -110,7 +110,8 @@ def by_proposal(limit=50):
         "COUNT(*) AS calls, COALESCE(SUM(x.cost),0) AS cost "
         "FROM usage x LEFT JOIN proposals p ON p.id = x.proposal_id "
         "LEFT JOIN users u ON u.id = x.user_id "
-        "GROUP BY x.proposal_id ORDER BY cost DESC LIMIT ?", (limit,))
+        "GROUP BY x.proposal_id, p.name, p.id, u.email "
+        "ORDER BY cost DESC LIMIT ?", (limit,))
 
 
 def by_kind():
@@ -131,6 +132,6 @@ def for_proposal(pid):
 
 
 def average_proposal_cost():
-    r = _rows("SELECT AVG(c) AS avg FROM (SELECT SUM(cost) AS c FROM usage "
-              "WHERE proposal_id <> '-' GROUP BY proposal_id)")
-    return (r[0].get("avg") or 0) if r else 0
+    r = _rows("SELECT AVG(c) AS mean FROM (SELECT SUM(cost) AS c FROM usage "
+              "WHERE proposal_id <> '-' GROUP BY proposal_id) AS per_proposal")
+    return (r[0].get("mean") or r[0].get("avg") or 0) if r else 0

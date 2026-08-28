@@ -84,6 +84,8 @@
     color:var(--muted)}
   .checkspill .dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
   .checkspill.warn .dot{background:var(--amber)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  #v0Chip .dot{animation:pulse 1.6s ease-in-out infinite}
   .toast{margin:10px 18px 0;background:var(--green-soft);border:1px solid #cfe6d6;
     color:#2f6b3f;border-radius:11px;padding:9px 13px;font-size:13px;display:flex;
     align-items:center;gap:10px}
@@ -308,6 +310,14 @@
         <div class="btnwrap"><button id="btnQA">Run QA &amp; fix</button>
           <span class="hint">Check the whole proposal and repair it</span></div>
         <div class="btnwrap"><button id="btnScreens">UI screens</button><span class="hint">Add the app screens</span></div>
+        <div class="checkspill" id="v0Chip" style="display:none;margin-left:auto;
+             background:var(--amber-soft);color:var(--amber);border-radius:99px;
+             padding:4px 11px;font-weight:600">
+          <span class="dot" style="background:var(--amber)"></span>
+          <span id="v0Text">v0 is building</span>
+          <button class="ghost" id="v0Cancel" style="padding:0 4px;color:inherit"
+                  title="Stop waiting. The build carries on and can be fetched later.">×</button>
+        </div>
         <div class="checkspill" id="checkPill"><span class="dot"></span>
           <span id="checkText">No layout checks</span></div>
       </div>
@@ -432,7 +442,7 @@
     <select id="screenEngine" style="width:auto">
       <option value="auto">Best available</option>
       <option value="fast">Fast (about a minute, photographic)</option>
-      <option value="v0">v0 (best quality, very slow)</option>
+      <option value="v0">v0 (best quality, 10 to 40 minutes)</option>
       <option value="builtin">Built in (instant, no photos)</option>
       <option value="none">No screens at all</option></select>
     <button id="btnTestKeys">Test keys</button>
@@ -491,7 +501,12 @@ const api = async (url, body) => {
                              body: JSON.stringify(body)});
   let j;
   try { j = await r.json(); }
-  catch (e) { throw new Error('Server returned ' + r.status + ' with no JSON body.'); }
+  catch (e) {
+    const text = await r.text().catch(() => '');
+    throw new Error(r.status === 504
+      ? 'That step took longer than the server allows.'
+      : 'Server returned ' + r.status + (text ? ': ' + text.slice(0, 200) : ''));
+  }
   if (!r.ok) throw new Error(j.error || j.detail || ('Server returned ' + r.status));
   return j;
 };
@@ -878,6 +893,37 @@ function drawNotes(){
       go.style.marginTop = '9px';
       go.textContent = n.done ? 'Run again' : 'Ask the assistant to do this';
       go.onclick = ev => { ev.stopPropagation(); runNote(i); };
+      if (n.done && n.before) {
+        const undo = document.createElement('button');
+        undo.className = 'ghost'; undo.style.marginTop = '9px';
+        undo.textContent = 'Undo just this';
+        undo.title = 'Put the proposal back to how it was before this comment '
+                   + 'was applied, leaving later changes alone';
+        undo.onclick = ev => {
+          ev.stopPropagation();
+          const redo = JSON.parse(JSON.stringify(data()));
+          commit(d => Object.assign(d, JSON.parse(JSON.stringify(n.before))),
+                 'undid comment: ' + n.body.slice(0, 40));
+          n.done = false; n.redo = redo; delete n.before;
+          persist(); drawNotes(); drawPins();
+          toast('That comment has been undone.');
+        };
+        el.append(undo);
+      }
+      if (!n.done && n.redo) {
+        const redo = document.createElement('button');
+        redo.className = 'ghost'; redo.style.marginTop = '9px';
+        redo.textContent = 'Redo';
+        redo.onclick = ev => {
+          ev.stopPropagation();
+          const before = JSON.parse(JSON.stringify(data()));
+          commit(d => Object.assign(d, JSON.parse(JSON.stringify(n.redo))),
+                 'redid comment: ' + n.body.slice(0, 40));
+          n.done = true; n.before = before; delete n.redo;
+          persist(); drawNotes(); drawPins();
+        };
+        el.append(redo);
+      }
       const show = document.createElement('button');
       show.className = 'ghost'; show.textContent = 'Show on page';
       show.onclick = ev => { ev.stopPropagation(); page = n.page;
@@ -1136,8 +1182,32 @@ $('#btnAdmin').onclick = async () => {
   host.innerHTML = '<p class="lab">Loading\u2026</p>';
   dlgAdmin.showModal();
   try {
-    const r = await (await fetch('/api/admin/overview')).json();
+    const res = await fetch('/api/admin/overview');
+    const r = await res.json().catch(async () => ({
+      error: 'Server returned ' + res.status + ': '
+           + (await res.text().catch(() => '')).slice(0, 200) }));
     host.innerHTML = '';
+    if (r.detail || r.error) {
+      const w = document.createElement('div');
+      w.className = 'banner warn';
+      w.textContent = r.detail || r.error;
+      host.append(w);
+      if (r.trace) {
+        const pre = document.createElement('pre');
+        pre.style.cssText = 'font-size:11px;white-space:pre-wrap;color:var(--muted)';
+        pre.textContent = r.trace.join('\n');
+        host.append(pre);
+      }
+      return;
+    }
+    // a section that failed reports itself instead of vanishing
+    Object.entries(r).forEach(([k, v]) => {
+      if (v && v.error) {
+        const w = document.createElement('div');
+        w.className = 'banner warn'; w.textContent = v.error;
+        host.append(w);
+      }
+    });
     const sect = t => { const d = document.createElement('div');
       d.className = 'sect'; d.textContent = t; host.append(d); };
     const table = (cols, rows) => {
@@ -1158,7 +1228,7 @@ $('#btnAdmin').onclick = async () => {
     };
 
     sect('System health');
-    const h2 = r.health;
+    const h2 = r.health || {};
     table(['Check', 'Value'], [
       ['Build', h2.build],
       ['Page artwork', h2.assets ? 'all 15 present' : 'MISSING'],
@@ -1455,16 +1525,12 @@ async function runScreens(only, mode){
   }
   if (only) slots = slots.slice(0, 1);
 
+  if (engine === 'v0') return runV0(slots);
+
   if (engine !== 'builtin') {
-    const viaV0 = engine === 'v0';
-    progress(viaV0 ? 'Building the UI screens with v0'
-                   : 'Designing the UI screens',
-             viaV0
-               ? 'v0 builds a project and boots a sandbox, which can take '
-                 + 'tens of minutes for ' + slots.length + ' screens.'
-               : 'Writing all ' + slots.length + ' screens, rendering them once '
-                 + 'and cutting each one out. About a minute.',
-             25, viaV0 ? 1500 : 70);
+    progress('Designing the UI screens',
+             'Writing all ' + slots.length + ' screens, rendering them once '
+             + 'and cutting each one out. About a minute.', 25, 70);
     try {
       const r = await api('/api/auto-screens', {data: data(), brief: {}, engine,
                           slot_ids: slots.map(s => s.id)});
@@ -1509,6 +1575,65 @@ async function runScreens(only, mode){
     toast(failures.length + ' screen(s) failed. ' + failures[0], 'err');
   else toast(made + ' screen' + (made>1?'s':'') + ' attached.');
 }
+// v0 runs for tens of minutes, so it is started and then polled. Closing the
+// dialog is fine; the build carries on and is collected when it is ready.
+let v0Timer = null;
+
+function v0Chip(text){
+  $('#v0Chip').style.display = text ? 'flex' : 'none';
+  if (text) $('#v0Text').textContent = text;
+}
+$('#v0Cancel').onclick = () => {
+  clearTimeout(v0Timer); v0Timer = null; v0Chip('');
+  toast('Stopped watching. The build carries on at v0; use "Fetch from v0" in '
+      + 'UI screens when you want it.');
+};
+
+async function runV0(slots){
+  const ids = slots.map(s => s.id);
+  v0Chip('starting v0');
+  let job;
+  try {
+    job = await api('/api/screens/v0-start', {data: data(), slot_ids: ids});
+  } catch (e) { v0Chip(''); return toast(e.message, 'err'); }
+
+  doc.v0job = {chat_id: job.chat_id, slot_ids: ids, started: Date.now()};
+  persist();
+  dlgScreens.close();
+  toast('v0 is building in the background. Keep editing, ask the assistant, '
+      + 'run QA. The screens drop in when they are ready, usually 25 to 40 '
+      + 'minutes.');
+  watchV0();
+}
+
+// a timer, not a loop, so nothing in the editor is blocked while it runs
+function watchV0(){
+  clearTimeout(v0Timer);
+  if (!doc || !doc.v0job) { v0Chip(''); return; }
+  const {chat_id, slot_ids, started} = doc.v0job;
+  const mins = Math.round((Date.now() - started) / 60000);
+  v0Chip('v0 building \u00b7 ' + (mins ? mins + ' min' : 'just started'));
+  if (Date.now() - started > 60 * 60 * 1000) {
+    v0Chip('');
+    return toast('v0 has been building for an hour. Use "Fetch from v0" in UI '
+               + 'screens to collect it when it finishes.', 'err');
+  }
+  v0Timer = setTimeout(async () => {
+    try {
+      const s = await api('/api/screens/v0-poll',
+                          {data: data(), chat_id, slot_ids});
+      if (s.ready) {
+        doc.screens = Object.assign(doc.screens || {}, s.screens || {});
+        screenSlots().forEach(x => { if ((s.screens || {})[x.id]) x.set(x.id); });
+        delete doc.v0job; persist(); drawScreenList(); schedulePreview();
+        v0Chip('');
+        return toast(s.count + ' screens arrived from v0 and are in place.');
+      }
+    } catch (e) { /* a blip is not a failure; keep waiting */ }
+    watchV0();
+  }, 20000);
+}
+
 $('#btnAutoScreens').onclick = () => {
   if (Object.keys(doc.screens || {}).length &&
       !confirm('This replaces every screen, including the ones already there. '
@@ -1725,6 +1850,8 @@ function drawPins(){
 
 async function runNote(i){
   const n = doc.notes[i];
+  // remember where we were, so this one change can be undone on its own
+  const before = JSON.parse(JSON.stringify(data()));
   const fields = fieldsUnder(n);
   const ctx = {page_number: n.page + 1,
                page_title: (outline[n.page] || {}).name || '',
@@ -1744,6 +1871,8 @@ async function runNote(i){
     progressDone();
     if (!r.applied) return toast(r.note || 'Nothing was changed.', 'err');
     n.done = true;
+    n.before = before;                 // one-click undo for this comment alone
+    n.ranAt = stamp();
     commit(d => Object.assign(d, r.data), 'comment: ' + n.body.slice(0, 50));
     toast(r.note || 'Change applied.');
   } catch (e) { progressDone(); toast(e.message, 'err'); }
@@ -1929,6 +2058,11 @@ async function showList(){
       + 'No proposals yet. Start one from a call transcript.</p>';
 }
 
+function resumeV0(){
+  // a build started earlier keeps being watched, even across a reload
+  if (doc && doc.v0job) watchV0();
+}
+
 async function openProposal(id){
   const j = await (await fetch('/api/proposals/' + id)).json();
   pid = id;
@@ -1940,6 +2074,7 @@ async function openProposal(id){
   $('#gate').style.display = 'none';
   $('#appShell').style.display = 'grid';
   refreshAll();
+  resumeV0();
 }
 $('#btnNewFromList').onclick = () => {
   $('#gate').style.display = 'none';

@@ -79,6 +79,16 @@ def wrap(text, font, size, maxw):
     return out
 
 
+def fit_text(text, font, size, maxw):
+    """Trim a single line to the width available, with an ellipsis."""
+    text = as_text(text)
+    if sw(text, font, size) <= maxw:
+        return text
+    while text and sw(text + "\u2026", font, size) > maxw:
+        text = text[:-1]
+    return text.rstrip() + "\u2026"
+
+
 def fit_one_line(text, font, size, maxw, floor=8.0, step=0.2):
     """Shrink until the string fits on a single line."""
     while sw(text, font, size) > maxw and size > floor:

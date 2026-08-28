@@ -42,6 +42,19 @@ app = FastAPI(title="Inceptives Digital Proposal Studio", docs_url=None,
               redoc_url=None, openapi_url=None)
 
 
+@app.exception_handler(Exception)
+async def any_error(request, exc):
+    """Never return plain text. A readable message beats a parse failure."""
+    import traceback
+    detail = "%s: %s" % (type(exc).__name__, exc)
+    trace = traceback.format_exc()
+    print("[error] %s %s\n%s" % (request.method, request.url.path, trace))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": detail, "where": request.url.path,
+                 "trace": trace.strip().splitlines()[-6:]})
+
+
 @app.middleware("http")
 async def security_headers(request, call_next):
     """Standard hardening: no framing, no sniffing, no referrer leakage."""
@@ -142,6 +155,17 @@ class AutoScreensIn(BaseModel):
     have: list = []             # slots that already have a screen
 
 
+class V0StartIn(BaseModel):
+    data: dict
+    slot_ids: list = []
+
+
+class V0PollIn(BaseModel):
+    data: dict
+    chat_id: str
+    slot_ids: list = []
+
+
 class RecoverIn(BaseModel):
     sources: dict = {}          # slot id -> {"url": ..., "chat_id": ..., "device": ...}
 
@@ -206,7 +230,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.10-split-stages"
+BUILD = "2026-08-29.14-background-v0"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -527,6 +551,52 @@ def api_v0_chats():
         return {"chats": V0.list_chats(30)}
     except Exception as exc:                                  # noqa: BLE001
         raise HTTPException(400, str(exc))
+
+
+@app.post("/api/screens/v0-start")
+def api_v0_start(body: V0StartIn, session: str = Cookie(None)):
+    """Start a v0 build and return at once. Nothing here waits."""
+    if not V0.configured():
+        raise HTTPException(400, "v0 needs V0_API_KEY plus a screenshot key.")
+    slots = screen_slots(body.data)
+    if body.slot_ids:
+        wanted = set(body.slot_ids)
+        slots = [s for s in slots if s["id"] in wanted]
+    if not slots:
+        raise HTTPException(400, "No screens are needed for this proposal.")
+    u = DB.user_for(session)
+    USAGE.set_context(u["id"] if u else None, "screens")
+    name = body.data.get("meta", {}).get("project_name", "the app")
+    try:
+        started = V0.start_batch(slots, name)
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+    return {"chat_id": started["chat_id"],
+            "slot_ids": [s["id"] for s in slots],
+            "note": "v0 is building. This usually takes ten to forty minutes."}
+
+
+@app.post("/api/screens/v0-poll")
+def api_v0_poll(body: V0PollIn, session: str = Cookie(None)):
+    """Has it finished? Returns the screens once it has."""
+    slots = screen_slots(body.data)
+    if body.slot_ids:
+        wanted = set(body.slot_ids)
+        slots = [s for s in slots if s["id"] in wanted]
+    u = DB.user_for(session)
+    USAGE.set_context(u["id"] if u else None, "screens")
+    try:
+        out = V0.poll_batch(body.chat_id, slots)
+    except Exception as exc:                                  # noqa: BLE001
+        return {"ready": False, "status": "still building (%s)" % str(exc)[:90]}
+    if not out.get("ready"):
+        return {"ready": False, "status": out.get("status", "building")}
+    screens = {}
+    for slot, png in zip(slots, out["images"]):
+        screens[slot["id"]] = ("data:image/png;base64," +
+                               base64.b64encode(png).decode())
+    return {"ready": True, "screens": screens, "count": len(screens),
+            "url": out.get("url")}
 
 
 @app.post("/api/screens-recover")
@@ -968,13 +1038,26 @@ def _at(data, path):
     return node if isinstance(node, str) else ""
 
 
+def _safe(label, fn, default):
+    """One broken panel should not take the whole admin view with it."""
+    try:
+        return fn()
+    except Exception as exc:                                  # noqa: BLE001
+        return {"error": "%s failed: %s" % (label, str(exc)[:180])} \
+            if isinstance(default, dict) else default
+
+
 @app.get("/api/admin/overview")
 def api_admin_overview(session: str = Cookie(None)):
-    """System health, usage and what it is costing."""
+    """System health, usage and what it is costing.
+
+    Every section is fetched independently, so a fault in one shows up as a
+    message in that panel rather than an empty page.
+    """
     admin(session)
     plates = os.path.join(ROOT, "assets", "plates")
     return {
-        "health": {
+        "health": _safe("health", lambda: {
             "build": BUILD,
             "assets": os.path.isdir(plates) and len(os.listdir(plates)) >= 15,
             "anthropic_key_set": bool(os.environ.get("ANTHROPIC_API_KEY")),
@@ -987,19 +1070,22 @@ def api_admin_overview(session: str = Cookie(None)):
                              "matched to the subject."),
             "generate_model": os.environ.get("PROPOSAL_MODEL", "claude-sonnet-5"),
             "allowed_domains": DB.ALLOWED_DOMAINS,
-        },
-        "database": {"backend": SQL.backend(), "reachable": SQL.ping()[0]},
-        "mail_configured": MAIL.configured(),
-        "totals": USAGE.totals(),
-        "average_proposal": USAGE.average_proposal_cost(),
-        "by_user": USAGE.by_user(),
-        "by_proposal": USAGE.by_proposal(),
-        "by_kind": USAGE.by_kind(),
-        "recent": USAGE.recent(),
-        "users": DB.users(),
-        "rules": LEARN.rules(),
-        "activity": DB.activity(120),
-        "activity_by_user": DB.activity_summary(),
+            "database_backend": SQL.backend(),
+        }, {}),
+        "database": _safe("database", lambda: {"backend": SQL.backend(),
+                          "reachable": SQL.ping()[0]}, {}),
+        "mail_configured": _safe("mail", MAIL.configured, False),
+        "totals": _safe("totals", USAGE.totals, {}),
+        "average_proposal": _safe("average", USAGE.average_proposal_cost, 0),
+        "by_user": _safe("spend by user", USAGE.by_user, []),
+        "by_proposal": _safe("spend by proposal", USAGE.by_proposal, []),
+        "by_kind": _safe("spend by service", USAGE.by_kind, []),
+        "recent": _safe("recent calls", USAGE.recent, []),
+        "users": _safe("people", DB.users, []),
+        "rules": _safe("rules", LEARN.rules, []),
+        "activity": _safe("activity", lambda: DB.activity(120), []),
+        "activity_by_user": _safe("activity summary", DB.activity_summary, []),
+        "errors": [],
     }
 
 

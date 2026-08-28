@@ -186,9 +186,26 @@ def _call_with_images(client, system, payload, images, max_tokens, model):
                            "at a time.")
     try:
         return _parse_json(text)
-    except ValueError as exc:
-        raise RuntimeError("The assistant did not return valid JSON (%s). It "
-                           "began: %s" % (exc, text[:200].replace("\n", " ")))
+    except ValueError:
+        pass
+    # one retry, telling it exactly what was wrong with the last reply
+    retry = list(content) + [
+        {"type": "text",
+         "text": "Your last reply was not valid JSON:\n\n%s\n\nSend the same "
+                 "thing again as a single valid JSON object, nothing else."
+                 % text[:1200]}]
+    try:
+        msg = client.messages.create(model=model, max_tokens=max_tokens,
+                                     system=system,
+                                     messages=[{"role": "user",
+                                                "content": retry}])
+        _meter(msg, model, "assistant retry")
+        again = "".join(b.text for b in msg.content if b.type == "text")
+        return _parse_json(again)
+    except Exception as exc:                                  # noqa: BLE001
+        raise RuntimeError(
+            "The assistant could not put its answer into a usable form. Try "
+            "asking for one change at a time. (%s)" % str(exc)[:120])
 
 
 def summarise(data):

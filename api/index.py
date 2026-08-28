@@ -255,7 +255,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.22-assistant-sees"
+BUILD = "2026-08-29.23-json-repair"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 

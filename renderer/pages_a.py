@@ -328,34 +328,45 @@ def _grid_items(c, items, x, y0, maxw, page, idx, path=None):
 
 
 def _core_grid(c, page, spec, screens):
-    """Page 5 style: 2x2 cards, each with a UI glimpse."""
+    """Page 5 style: 2x2 cards, each with a UI glimpse.
+
+    The mockups are drawn before the words. Drawn after, they sat on top of the
+    card titles and hid them.
+    """
     plate(c, page)
     eyebrow(c, *P5["eyebrow"][:2], spec["eyebrow"], P5["eyebrow"][2])
     fit_headline(c, P5["headline"][0], P5["headline"][1], spec["headline"],
                  P5["headline"][2], W - P5["headline"][0] - 30, page=page)
-    for i, card in enumerate(spec["cards"][:len(P5["icon"])]):
+    cards = spec["cards"][:len(P5["icon"])]
+
+    if not spec.get("no_screens"):
+        for i, card in enumerate(cards):
+            x0, x1, y0, y1 = P5["slots"][i]
+            path = screens.get(card.get("screen", ""))
+            if path:
+                from PIL import Image
+                im = Image.open(path)
+                fx, fy, fw, fh = fit_box(im.width, im.height, x0, H-y1,
+                                         x1-x0, y1-y0, anchor="center")
+                place_image(c, path, fx, fy, fw, fh, radius=10)
+            else:
+                placeholder(c, x0, H-y1, x1-x0, y1-y0)
+
+    for i, card in enumerate(cards):
         draw_icon(c, *P5["icon"][i], 21, ic(card.get("icon", "ic_home")))
+        # the title must stop before the mockup, not run underneath it
+        room = P5["bw"][i] + (86 if spec.get("no_screens") else 0)
+        if not spec.get("no_screens"):
+            room = min(room, P5["slots"][i][0] - P5["tx"][i] - 8)
         c.setFillColorRGB(*INK)
         c.setFont("G-Med", 12.68)
         for j, (ln, y) in enumerate(zip(card["title"][:2], P5["ty"][i])):
-            c.drawString(P5["tx"][i], y, ln)
+            c.drawString(P5["tx"][i], y, fit_text(ln, "G-Med", 12.68, room))
             map_field("%s.cards.%d.title.%d" % (spec["_path"], i, j),
-                      P5["tx"][i], y, 120, 15, 12.68, "G-Med")
-        wide = P5["bw"][i] + (86 if spec.get("no_screens") else 0)
-        _grid_items(c, card["items"], P5["bx"][i], P5["by"][i], wide, page, i,
-                    "%s.cards.%d" % (spec["_path"], i))
-        if spec.get("no_screens"):
-            continue
-        x0, x1, y0, y1 = P5["slots"][i]
-        path = screens.get(card.get("screen", ""))
-        if path:
-            from PIL import Image
-            im = Image.open(path)
-            fx, fy, fw, fh = fit_box(im.width, im.height, x0, H-y1,
-                                     x1-x0, y1-y0)
-            place_image(c, path, fx, fy, fw, fh)
-        else:
-            placeholder(c, x0, H-y1, x1-x0, y1-y0)
+                      P5["tx"][i], y, room, 15, 12.68, "G-Med")
+        _grid_items(c, card["items"], P5["bx"][i], P5["by"][i],
+                    P5["bw"][i] + (86 if spec.get("no_screens") else 0),
+                    page, i, "%s.cards.%d" % (spec["_path"], i))
 
 
 def _core_list(c, page, spec):

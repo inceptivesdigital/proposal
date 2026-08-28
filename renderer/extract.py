@@ -109,16 +109,61 @@ def _strip_fences(text):
     return text.strip()
 
 
+def repair_json(text):
+    """Close what is open and drop what does not match.
+
+    A reply is occasionally a bracket out, which is a shame to throw away when
+    the content is fine. This walks the string, tracking whether it is inside a
+    quote, and rebuilds a balanced document.
+    """
+    out, stack, in_string, escape = [], [], False, False
+    for ch in text:
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch in "{[":
+            stack.append(ch)
+            out.append(ch)
+        elif ch in "}]":
+            want = "{" if ch == "}" else "["
+            if stack and stack[-1] == want:
+                stack.pop()
+                out.append(ch)
+            # a closer that matches nothing is dropped
+        else:
+            out.append(ch)
+    if in_string:
+        out.append('"')
+    while stack:
+        out.append("}" if stack.pop() == "{" else "]")
+    return "".join(out)
+
+
 def _parse_json(text):
-    """Models sometimes wrap JSON in a sentence. Take the outermost object."""
+    """Models sometimes wrap JSON in a sentence, or miscount a bracket."""
     text = _strip_fences(text)
-    try:
-        return json.loads(text)
-    except ValueError:
-        pass
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        return json.loads(text[start:end + 1])
+    for candidate in (text, None):
+        if candidate is None:
+            start, end = text.find("{"), text.rfind("}")
+            if start == -1 or end <= start:
+                break
+            candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except ValueError:
+            try:
+                return json.loads(repair_json(candidate))
+            except ValueError:
+                continue
     raise ValueError("no JSON object found in the reply")
 
 

@@ -1795,7 +1795,11 @@ $('#btnAuth').onclick = async () => {
       return;
     }
     user = j.user; applyUser(); await showList();
-  } catch (e) { authMsg(e.message); }
+  } catch (e) {
+    authMsg(e.message);
+    // a failed send clears the pending sign-up, so the button stays usable
+    $('#btnAuth').disabled = false;
+  }
 };
 $('#btnVerify').onclick = async () => {
   authMsg('');

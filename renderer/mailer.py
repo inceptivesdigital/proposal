@@ -4,16 +4,33 @@ Nobody gets an account without proving they hold the address, which matters
 because the address is what grants access to every client proposal.
 """
 import os
+import re
 import smtplib
 import ssl
+import unicodedata
+from email.headerregistry import Address
 from email.message import EmailMessage
+from email.utils import formataddr, make_msgid
 
-HOST = os.environ.get("SMTP_HOST", "")
-PORT = int(os.environ.get("SMTP_PORT", "587"))
-USER = os.environ.get("SMTP_USER", "")
-PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SENDER = os.environ.get("SMTP_FROM", USER or "no-reply@inceptivesdigital.com")
-SENDER_NAME = os.environ.get("SMTP_FROM_NAME", "Inceptives Digital Proposal Studio")
+
+def _clean(value):
+    """Values pasted from a browser often carry non-breaking spaces and other
+    invisible characters. One of those in a header stops the send."""
+    if not value:
+        return ""
+    text = unicodedata.normalize("NFKC", str(value))
+    text = text.replace("\u200b", "").replace("\ufeff", "")
+    text = re.sub(r"[\r\n\t]+", " ", text)
+    return text.strip()
+
+HOST = _clean(os.environ.get("SMTP_HOST", ""))
+PORT = int(_clean(os.environ.get("SMTP_PORT", "587")) or 587)
+USER = _clean(os.environ.get("SMTP_USER", ""))
+PASSWORD = os.environ.get("SMTP_PASSWORD", "").strip()   # never normalised
+SENDER = _clean(os.environ.get("SMTP_FROM", "")) or USER or \
+    "no-reply@inceptivesdigital.com"
+SENDER_NAME = _clean(os.environ.get("SMTP_FROM_NAME",
+                                    "Inceptives Digital Proposal Studio"))
 # with no mail server configured the code is printed to the server log, which is
 # fine on your own machine and refused in production
 DEV_ECHO = os.environ.get("OTP_DEV_ECHO", "1") == "1"
@@ -21,6 +38,20 @@ DEV_ECHO = os.environ.get("OTP_DEV_ECHO", "1") == "1"
 
 def configured():
     return bool(HOST and USER and PASSWORD)
+
+
+def check():
+    """What is configured, and whether anything looks wrong with it."""
+    problems = []
+    for label, value in (("SMTP_HOST", HOST), ("SMTP_USER", USER),
+                         ("SMTP_PASSWORD", PASSWORD)):
+        if not value:
+            problems.append("%s is not set" % label)
+    if SENDER and "@" not in SENDER:
+        problems.append("SMTP_FROM is not an email address")
+    return {"configured": configured(), "host": HOST, "port": PORT,
+            "sender": SENDER, "sender_name": SENDER_NAME,
+            "problems": problems}
 
 
 def send_code(to_email, code, purpose="verify your email"):
@@ -40,17 +71,37 @@ def send_code(to_email, code, purpose="verify your email"):
             "Set SMTP_HOST, SMTP_USER and SMTP_PASSWORD.")
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = "%s <%s>" % (SENDER_NAME, SENDER)
-    msg["To"] = to_email
-    msg.set_content(body)
+    # formataddr encodes a non-ASCII display name properly instead of failing
+    msg["From"] = formataddr((SENDER_NAME, SENDER))
+    msg["To"] = _clean(to_email)
+    msg["Message-ID"] = make_msgid(domain=SENDER.rsplit("@", 1)[-1])
+    msg.set_content(body, charset="utf-8")
     context = ssl.create_default_context()
+    try:
+        return _deliver(msg, context)
+    except smtplib.SMTPAuthenticationError:
+        raise RuntimeError(
+            "The mail server refused the login. For Google Workspace this must "
+            "be a 16-character app password, not the account password.")
+    except smtplib.SMTPException as exc:
+        raise RuntimeError("The mail server rejected the message: %s" % exc)
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            "One of the SMTP settings contains a character that cannot be sent "
+            "in an email header, usually a non-breaking space pasted from a "
+            "browser. Retype SMTP_FROM_NAME and SMTP_FROM by hand. (%s)" % exc)
+
+
+def _deliver(msg, context):
     if PORT == 465:
-        with smtplib.SMTP_SSL(HOST, PORT, context=context, timeout=20) as s:
+        with smtplib.SMTP_SSL(HOST, PORT, context=context, timeout=25) as s:
             s.login(USER, PASSWORD)
             s.send_message(msg)
     else:
-        with smtplib.SMTP(HOST, PORT, timeout=20) as s:
+        with smtplib.SMTP(HOST, PORT, timeout=25) as s:
+            s.ehlo()
             s.starttls(context=context)
+            s.ehlo()
             s.login(USER, PASSWORD)
             s.send_message(msg)
     return {"sent": True, "echoed": False}

@@ -187,7 +187,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.6-header-fix"
+BUILD = "2026-08-29.7-mail-fix"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -222,6 +222,8 @@ def production_warnings():
     if not MAIL.configured():
         out.append("No mail server, so sign-up codes are printed to the log "
                    "instead of emailed.")
+    for problem in MAIL.check()["problems"]:
+        out.append("Email: %s" % problem)
     if os.environ.get("COOKIE_SECURE", "0") != "1":
         out.append("COOKIE_SECURE is not 1, so session cookies are sent over "
                    "plain HTTP as well as HTTPS.")
@@ -272,6 +274,7 @@ def health():
         "db_driver": SQL.DRIVER[0] or "not loaded",
         "dependencies": _dependency_check(),
         "tables": SQL.table_check(),
+        "mail": MAIL.check(),
         "mail_configured": MAIL.configured(),
         "warnings": production_warnings(),
         "staged_endpoints": True,
@@ -674,7 +677,9 @@ def api_signup(body: AuthIn):
     try:
         sent = MAIL.send_code(body.email.strip().lower(), code)
     except Exception as exc:                                  # noqa: BLE001
-        raise HTTPException(400, str(exc))
+        # the code never left the building, so let them retry immediately
+        DB.clear_pending(body.email)
+        raise HTTPException(400, "The code could not be sent. %s" % exc)
     return {"pending": True, "email": body.email.strip().lower(),
             "mail_configured": MAIL.configured(),
             "note": ("We sent a six-digit code to %s." % body.email
@@ -937,6 +942,22 @@ def api_user_disabled(body: dict, session: str = Cookie(None)):
     admin(session)
     DB.set_disabled(body.get("user_id", ""), bool(body.get("disabled")))
     return {"ok": True}
+
+
+@app.post("/api/auth/test-mail")
+def api_test_mail(body: DocIn):
+    """Send a test code to an address, to prove the mail settings work."""
+    to = (body.filename or "").strip().lower()
+    if not to or "@" not in to:
+        raise HTTPException(400, "Give the address to send the test to.")
+    if not DB.domain_allowed(to):
+        raise HTTPException(400, "Only %s addresses can be tested."
+                            % ", ".join(DB.ALLOWED_DOMAINS))
+    try:
+        out = MAIL.send_code(to, "000000", "test the mail settings")
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "sent": out.get("sent"), "settings": MAIL.check()}
 
 
 @app.get("/api/credits")

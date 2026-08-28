@@ -174,6 +174,13 @@ def start_signup(email, password, name=""):
     return code
 
 
+def clear_pending(email):
+    """Drop a half-finished sign-up so the person can try again at once."""
+    with conn() as c:
+        c.execute("DELETE FROM pending WHERE email=?",
+                  ((email or "").strip().lower(),))
+
+
 def verify_signup(email, code):
     """Step two: the code proves they hold the address, so create the account."""
     email = (email or "").strip().lower()

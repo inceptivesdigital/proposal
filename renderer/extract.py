@@ -538,7 +538,11 @@ def make_screens(slots, brief, meta, client=None):
 
 
 def screen_slots(data):
-    """Every screen this proposal needs, derived from its own content."""
+    """Every screen this proposal needs, derived from its own content.
+
+    Two cards can share one screen id, so the list is deduplicated: the image
+    is built once and used in both places.
+    """
     slots = []
     for cp in data.get("core_pages", []):
         if cp.get("kind") == "grid":
@@ -560,4 +564,10 @@ def screen_slots(data):
         slots.append({"id": p9.get("screen") or "p9_phone", "device": "phone",
                       "title": "Direct marketing",
                       "points": [c.get("body", "") for c in p9.get("cards", [])]})
-    return slots
+    out, seen = [], set()
+    for slot in slots:
+        if slot["id"] in seen:
+            continue
+        seen.add(slot["id"])
+        out.append(slot)
+    return out

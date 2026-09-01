@@ -435,13 +435,14 @@
 
 <dialog id="dlgScreens"><h3>UI screens</h3><div class="in">
   <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-    <button class="primary" id="btnGenScreens">Generate screens</button>
-    <button id="btnScratch">Build from scratch</button>
+    <button class="primary" id="btnGenScreens">Generate missing screens</button>
+    <button id="btnScratch">Rebuild all from scratch</button>
+    <span class="hint" id="engineNote"></span>
     <select id="screenEngine" style="width:auto">
       <option value="auto">Best available</option>
-      <option value="fast">Fast (about a minute, photographic)</option>
-      <option value="v0">v0 (best quality, 10 to 40 minutes)</option>
-      <option value="builtin">Built in (instant, no photos)</option>
+      <option value="fast">Photographic · about a minute</option>
+      <option value="builtin">Drawn here · seconds, no photos</option>
+      <option value="v0">v0 · best quality, 10 to 40 minutes</option>
       <option value="none">No screens at all</option></select>
     <button id="btnTestKeys">Test keys</button>
   </div>
@@ -1497,7 +1498,11 @@ $('#btnQAApply').onclick = async () => {
   } catch (e) { progressDone(); toast(e.message, 'err'); }
 };
 
-$('#btnScreens').onclick = () => { drawScreenList(); dlgScreens.showModal(); };
+$('#btnScreens').onclick = async () => {
+  await loadScreenIndex();       // reflect what the server actually holds
+  drawScreenList(); describeEngine(); await refreshScreenState();
+  dlgScreens.showModal();
+};
 function drawScreenList(){
   const host = $('#screenList'); host.innerHTML = '';
   const head = document.createElement('div'); head.className = 'sect';
@@ -1559,10 +1564,12 @@ async function absorbScreens(r){
 }
 
 async function runScreens(mode, numbers){
+  if (building) return toast('Screens are already being built. Wait for those '
+                           + 'to finish first.', 'err');
   const engine = $('#screenEngine').value;
 
   if (engine === 'none') {           // strip every mockup from the proposal
-    dlgScreens.close();
+    dlgScreens.close(); lockScreenButtons(false);
     commit(d => { d.no_screens = true; }, 'removed the UI mockups');
     doc.screens = {}; persist(); drawScreenList();
     return toast('Mockups removed. The feature text now fills the space.');
@@ -1586,12 +1593,14 @@ async function runScreens(mode, numbers){
     slots = all.filter(s => !(doc.screens || {})[s.id]);
     if (!slots.length) {
       drawScreenList();
-      return toast('All ' + all.length + ' screens are already in place. Use '
-                 + '"Build from scratch" to replace them.');
+      return toast('All ' + all.length + ' screens are already in place. '
+                 + 'Nothing was built and nothing was charged. Use "Rebuild '
+                 + 'all from scratch" to replace them.');
     }
-    if (already) toast('Keeping the ' + already + ' screen(s) you already have, '
-                     + 'building the other ' + slots.length + '.');
+    if (already) toast('Keeping the ' + already + ' you already have, building '
+                     + 'the other ' + slots.length + '.');
   }
+  lockScreenButtons(true);
 
   if (engine === 'v0') return runV0(slots);
 
@@ -1602,19 +1611,24 @@ async function runScreens(mode, numbers){
         + 'editing; they will appear when they are ready.');
     try {
       const r = await api('/api/auto-screens', {data: data(), brief: {}, engine,
-                          proposal_id: pid || '',
+                          proposal_id: pid || '', replace: mode === 'scratch',
                           slot_ids: slots.map(s => s.id)});
       doc.screen_sources = Object.assign(doc.screen_sources || {},
                                          r.sources || {});
       await absorbScreens(r);
-      v0Chip('');
+      v0Chip(''); lockScreenButtons(false); refreshScreenState();
+      if (r.note && !r.count) return toast(r.note);
       if ((r.errors||[]).length && !r.count)
-        return toast('Screens failed: ' + r.errors[0], 'err');
+        return toast(r.errors[0], 'err');
+      if ((r.errors||[]).length)
+        toast(r.count + ' built, ' + r.errors.length + ' failed: '
+            + r.errors[0], 'err');
       await absorbScreens(r);
       drawScreenList(); schedulePreview();
       return toast(r.count + ' screens attached'
                  + (r.batched ? ' from a single build.' : '.'));
-    } catch (e) { v0Chip(''); return toast(e.message, 'err'); }
+    } catch (e) { v0Chip(''); lockScreenButtons(false);
+                  return toast(e.message, 'err'); }
   }
 
   // the built-in renderer takes a second or two per screen
@@ -1628,6 +1642,7 @@ async function runScreens(mode, numbers){
     try {
       const r = await api('/api/auto-screens', {data: data(), brief: {},
                           engine, proposal_id: pid || '',
+                          replace: mode === 'scratch',
                           slot_ids: [slots[i].id]});
       doc.screen_sources = Object.assign(doc.screen_sources || {},
                                          r.sources || {});
@@ -1638,11 +1653,11 @@ async function runScreens(mode, numbers){
       persist(); drawScreenList(); schedulePreview();
     } catch (e) { failures.push(slots[i].id + ': ' + e.message); }
   }
-  v0Chip('');
+  v0Chip(''); lockScreenButtons(false); refreshScreenState();
   const made = Object.keys(doc.screens || {}).length;
   if (failures.length)
     toast(failures.length + ' screen(s) failed. ' + failures[0], 'err');
-  else toast(made + ' screen' + (made>1?'s':'') + ' attached.');
+  else toast(made + ' screen' + (made>1?'s':'') + ' in place.');
 }
 // v0 runs for tens of minutes, so it is started and then polled. Closing the
 // dialog is fine; the build carries on and is collected when it is ready.
@@ -1703,13 +1718,59 @@ function watchV0(){
   }, 20000);
 }
 
+function describeEngine(){
+  const j = window.__engines || {};
+  const e = $('#screenEngine').value;
+  const notes = {
+    auto: j.fast_screens ? 'Will use the photographic engine.'
+        : (j.anthropic_key_set ? 'Will draw them here; add a screenshot key for '
+                               + 'photographic screens.' : 'Nothing configured yet.'),
+    fast: j.fast_screens ? 'Ready.' : 'Needs SCREENSHOT_PROVIDER and '
+        + 'SCREENSHOT_API_KEY on the server.',
+    builtin: j.anthropic_key_set ? 'Ready. No photos, but instant and free.'
+        : 'Needs ANTHROPIC_API_KEY.',
+    v0: j.v0_screens ? 'Ready. Runs in the background for 10 to 40 minutes.'
+        : 'Needs V0_API_KEY and a screenshot key.',
+    none: 'Removes every mockup and lets the text fill the space.',
+  };
+  $('#engineNote').textContent = notes[e] || '';
+}
+$('#screenEngine').onchange = describeEngine;
+
+let building = false;
+
+function lockScreenButtons(on){
+  building = on;
+  ['btnGenScreens', 'btnScratch', 'btnPickBuild'].forEach(id => {
+    const b = $('#' + id); if (b) b.disabled = on;
+  });
+  $('#btnGenScreens').textContent = on ? 'Building…' : 'Generate missing screens';
+}
+
 $('#btnGenScreens').onclick = () => runScreens('fill');
 $('#btnScratch').onclick = () => {
-  if (!confirm('Build every screen again from scratch? The ones you already '
-             + 'have will be replaced, and this spends credits on all of them.'))
+  const have = Object.keys(doc.screens || {}).length;
+  if (have && !confirm('Rebuild all ' + have + ' screens from scratch?\n\n'
+      + 'What you have will be replaced and every screen is charged for again. '
+      + 'To fill only the gaps, use "Generate missing screens" instead.'))
     return;
   runScreens('scratch');
 };
+
+// what exists and what is in flight, straight from the server
+async function refreshScreenState(){
+  if (!pid) { $('#screenState').textContent = 'Save this proposal to keep its screens.'; return; }
+  try {
+    const s = await (await fetch('/api/screens/state/' + pid)).json();
+    const total = screenSlots().length;
+    const busy = (s.building || []).length;
+    $('#screenState').textContent =
+      s.have.length + ' of ' + total + ' screens in place'
+      + (busy ? ' \u00b7 ' + busy + ' being built right now' : '')
+      + '. Generating only builds what is missing.';
+    if (busy) lockScreenButtons(true);
+  } catch (e) { $('#screenState').textContent = ''; }
+}
 $('#btnPickBuild').onclick = () => {
   const nums = ($('#pickNumbers').value || '').split(/[^0-9]+/)
                  .map(n => parseInt(n, 10)).filter(n => n > 0);

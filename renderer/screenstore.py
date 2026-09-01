@@ -185,3 +185,88 @@ def running(proposal_id):
                          "WHERE proposal_id=?", (proposal_id,)).fetchall()
     return [{"slot": r["slot"], "engine": r["engine"],
              "seconds": now_s - (r["started"] or now_s)} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+# Building a set of screens takes minutes, and a single request cannot. A job
+# records what is wanted; each step does one small piece and returns. Nothing
+# runs long enough to be cut off, and a job survives a reload.
+
+import json as _json
+import secrets as _secrets
+
+JOB_SCHEMA = """
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, proposal_id TEXT, engine TEXT, pending TEXT, done TEXT,
+  errors TEXT, chat_id TEXT, state TEXT, started INTEGER, updated INTEGER);
+"""
+_JOBS_READY = [False]
+
+
+def _jobs():
+    c = _conn()
+    if not _JOBS_READY[0]:
+        c.executescript(JOB_SCHEMA)
+        c.commit()
+        _JOBS_READY[0] = True
+    return c
+
+
+def start_job(proposal_id, engine, slot_ids):
+    job_id = _secrets.token_hex(8)
+    now_s = int(time.time())
+    with _jobs() as c:
+        c.execute("INSERT INTO jobs (id,proposal_id,engine,pending,done,errors,"
+                  "chat_id,state,started,updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (job_id, proposal_id, engine, _json.dumps(list(slot_ids)),
+                   "[]", "[]", "", "running", now_s, now_s))
+    return job_id
+
+
+def get_job(job_id):
+    with _jobs() as c:
+        row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        return None
+    out = dict(row)
+    for key in ("pending", "done", "errors"):
+        try:
+            out[key] = _json.loads(out[key] or "[]")
+        except Exception:                                     # noqa: BLE001
+            out[key] = []
+    return out
+
+
+def update_job(job_id, pending=None, done=None, errors=None, chat_id=None,
+               state=None):
+    sets, args = ["updated=?"], [int(time.time())]
+    if pending is not None:
+        sets.append("pending=?"); args.append(_json.dumps(list(pending)))
+    if done is not None:
+        sets.append("done=?"); args.append(_json.dumps(list(done)))
+    if errors is not None:
+        sets.append("errors=?"); args.append(_json.dumps(list(errors)))
+    if chat_id is not None:
+        sets.append("chat_id=?"); args.append(chat_id)
+    if state is not None:
+        sets.append("state=?"); args.append(state)
+    args.append(job_id)
+    with _jobs() as c:
+        c.execute("UPDATE jobs SET %s WHERE id=?" % ", ".join(sets), args)
+
+
+def active_job(proposal_id):
+    """A job still running for this proposal, if there is one."""
+    with _jobs() as c:
+        row = c.execute("SELECT id FROM jobs WHERE proposal_id=? AND "
+                        "state='running' ORDER BY started DESC LIMIT 1",
+                        (proposal_id,)).fetchone()
+    return row["id"] if row else None
+
+
+def sweep_jobs(max_age=3600):
+    with _jobs() as c:
+        c.execute("UPDATE jobs SET state='expired' WHERE state='running' "
+                  "AND updated < ?", (int(time.time()) - max_age,))

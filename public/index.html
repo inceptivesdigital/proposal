@@ -1577,14 +1577,12 @@ async function absorbScreens(r){
 }
 
 async function runScreens(mode, numbers){
-  if (building) return toast('Screens are already being built. Wait for those '
-                           + 'to finish first.', 'err');
+  if (building) return toast('Screens are already being built.', 'err');
   const engine = $('#screenEngine').value;
 
-  if (engine === 'none') {           // strip every mockup from the proposal
+  if (engine === 'none') {
     dlgScreens.close(); lockScreenButtons(false);
     commit(d => { d.no_screens = true; }, 'removed the UI mockups');
-    doc.screens = {}; persist(); drawScreenList();
     return toast('Mockups removed. The feature text now fills the space.');
   }
   if (data().no_screens) commit(d => { d.no_screens = false; }, 'mockups back on');
@@ -1594,84 +1592,74 @@ async function runScreens(mode, numbers){
   catch (e) { return toast(e.message, 'err'); }
   if (!all.length) return toast('No screen slots in this proposal.', 'err');
 
-  // anything already built is reused, whichever engine made it
   await loadScreenIndex();
-  let slots = all;
+  await reclaimExisting(all);            // free before anything is spent
+
+  let ids = [];
   if (mode === 'pick') {
-    slots = numbers.map(n => all[n - 1]).filter(Boolean);
-    if (!slots.length) return toast('Those numbers are outside the list.', 'err');
-  } else if (mode !== 'scratch') {
-    await reclaimExisting(all);            // free before we spend anything
-    const already = all.filter(s => (doc.screens || {})[s.id]).length;
-    slots = all.filter(s => !(doc.screens || {})[s.id]);
-    if (!slots.length) {
-      drawScreenList();
-      return toast('All ' + all.length + ' screens are already in place. '
-                 + 'Nothing was built and nothing was charged. Use "Rebuild '
-                 + 'all from scratch" to replace them.');
-    }
-    if (already) toast('Keeping the ' + already + ' you already have, building '
-                     + 'the other ' + slots.length + '.');
+    ids = (numbers || []).map(n => all[n - 1]).filter(Boolean).map(s => s.id);
+    if (!ids.length) return toast('Those numbers are outside the list.', 'err');
+  } else if (mode === 'scratch') {
+    ids = all.map(s => s.id);
   }
+
   lockScreenButtons(true);
-
-  if (engine === 'v0') return runV0(slots);
-
-  if (engine !== 'builtin') {
-    dlgScreens.close();
-    v0Chip('designing ' + slots.length + ' screens');
-    toast('Building ' + slots.length + ' screen(s) in the background. Carry on '
-        + 'editing; they will appear when they are ready.');
-    try {
-      const r = await api('/api/auto-screens', {data: data(), brief: {}, engine,
-                          proposal_id: pid || '', replace: mode === 'scratch',
-                          slot_ids: slots.map(s => s.id)});
-      doc.screen_sources = Object.assign(doc.screen_sources || {},
-                                         r.sources || {});
-      await absorbScreens(r);
-      v0Chip(''); lockScreenButtons(false); refreshScreenState();
-      if (r.note && !r.count) return toast(r.note);
-      if ((r.errors||[]).length && !r.count)
-        return toast(r.errors[0], 'err');
-      if ((r.errors||[]).length)
-        toast(r.count + ' built, ' + r.errors.length + ' failed: '
-            + r.errors[0], 'err');
-      await absorbScreens(r);
-      drawScreenList(); schedulePreview();
-      return toast(r.count + ' screens attached'
-                 + (r.batched ? ' from a single build.' : '.'));
-    } catch (e) { v0Chip(''); lockScreenButtons(false);
-                  return toast(e.message, 'err'); }
-  }
-
-  // the built-in renderer takes a second or two per screen
   dlgScreens.close();
-  const perScreen = 4;
-  const started = Date.now();
-  const failures = [];
-  doc.screens = doc.screens || {};
-  for (let i = 0; i < slots.length; i++) {
-    v0Chip('screen ' + (i+1) + ' of ' + slots.length);
-    try {
-      const r = await api('/api/auto-screens', {data: data(), brief: {},
-                          engine, proposal_id: pid || '',
-                          replace: mode === 'scratch',
-                          slot_ids: [slots[i].id]});
-      doc.screen_sources = Object.assign(doc.screen_sources || {},
-                                         r.sources || {});
-      await absorbScreens(r);
-      if ((r.errors||[]).length) failures.push(...r.errors);
-      Object.assign(doc.screens, r.screens || {});
-      screenSlots().forEach(s => { if ((r.screens||{})[s.id]) s.set(s.id); });
-      persist(); drawScreenList(); schedulePreview();
-    } catch (e) { failures.push(slots[i].id + ': ' + e.message); }
+
+  let job;
+  try {
+    job = await api('/api/screens/start', {
+      data: data(), proposal_id: pid || '', engine,
+      slot_ids: ids, replace: mode === 'scratch' || mode === 'pick'});
+  } catch (e) { lockScreenButtons(false); return toast(e.message, 'err'); }
+
+  if (!job.job_id) {
+    lockScreenButtons(false);
+    return toast(job.note || (job.errors || [])[0] || 'Nothing to build.',
+                 (job.errors || []).length ? 'err' : undefined);
   }
-  v0Chip(''); lockScreenButtons(false); refreshScreenState();
-  const made = Object.keys(doc.screens || {}).length;
-  if (failures.length)
-    toast(failures.length + ' screen(s) failed. ' + failures[0], 'err');
-  else toast(made + ' screen' + (made>1?'s':'') + ' in place.');
+  doc.screenJob = {id: job.job_id, engine: job.engine, started: Date.now()};
+  persist();
+  toast(job.note + ' Building in the background; carry on working.');
+  stepScreens();
 }
+
+// One short request per piece of work, so nothing can time out. The loop keeps
+// itself going with a timer, leaving the editor free.
+async function stepScreens(){
+  if (!doc || !doc.screenJob) { lockScreenButtons(false); v0Chip(''); return; }
+  const job = doc.screenJob;
+  const mins = Math.round((Date.now() - job.started) / 60000);
+  let r;
+  try {
+    r = await api('/api/screens/step', {data: data(), job_id: job.id,
+                                        proposal_id: pid || ''});
+  } catch (e) {
+    delete doc.screenJob; persist(); lockScreenButtons(false); v0Chip('');
+    return toast(e.message, 'err');
+  }
+
+  const total = (r.done || []).length + (r.pending || []).length;
+  v0Chip(r.status
+    ? r.status.slice(0, 40) + (mins ? ' \u00b7 ' + mins + ' min' : '')
+    : (r.done || []).length + ' of ' + total + ' screens');
+
+  await loadScreenIndex();
+  screenSlots().forEach(s => { if ((doc.screens || {})[s.id]) s.set(s.id); });
+  persist(); drawScreenList(); refreshScreenState(); schedulePreview();
+
+  if (r.finished) {
+    delete doc.screenJob; persist();
+    lockScreenButtons(false); v0Chip('');
+    if ((r.errors || []).length)
+      return toast((r.done || []).length + ' built, ' + r.errors.length
+                 + ' failed: ' + r.errors[0], 'err');
+    return toast((r.done || []).length + ' screen(s) in place.');
+  }
+  // v0 waits between polls; the others carry straight on
+  setTimeout(stepScreens, job.engine === 'v0' ? 20000 : 400);
+}
+
 // v0 runs for tens of minutes, so it is started and then polled. Closing the
 // dialog is fine; the build carries on and is collected when it is ready.
 let v0Timer = null;
@@ -2192,8 +2180,9 @@ async function showList(){
 }
 
 function resumeV0(){
-  // a build started earlier keeps being watched, even across a reload
-  if (doc && doc.v0job) watchV0();
+  // a build left running is picked up again, even after a reload
+  if (doc && doc.screenJob) { lockScreenButtons(true); stepScreens(); }
+  else if (doc && doc.v0job) watchV0();
 }
 
 async function openProposal(id){

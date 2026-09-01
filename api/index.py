@@ -256,7 +256,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.26-routes"
+BUILD = "2026-08-30.1-screen-jobs"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -690,6 +690,143 @@ def api_screen_delete(proposal_id: str, slot: str, session: str = Cookie(None)):
     me(session)
     SCREENS.delete(proposal_id, slot)
     return {"ok": True}
+
+
+class JobStartIn(BaseModel):
+    data: dict
+    proposal_id: str = ""
+    engine: str = "auto"
+    slot_ids: list = []
+    replace: bool = False
+
+
+class JobStepIn(BaseModel):
+    data: dict
+    job_id: str
+    proposal_id: str = ""
+
+
+@app.post("/api/screens/start")
+def api_job_start(body: JobStartIn, session: str = Cookie(None)):
+    """Plan the work and return at once. Nothing is built in this request."""
+    me(session)
+    engine = (body.engine or "auto").lower()
+    if engine == "none":
+        return {"job_id": "", "pending": [], "engine": "none",
+                "note": "No screens were generated."}
+
+    running = SCREENS.active_job(body.proposal_id) if body.proposal_id else None
+    if running:
+        job = SCREENS.get_job(running)
+        return {"job_id": running, "engine": job["engine"],
+                "pending": job["pending"], "done": job["done"],
+                "note": "A build is already running for this proposal."}
+
+    picked = _wanted_slots(_JobBody(body), replace=body.replace)
+    if isinstance(picked, dict):
+        return dict(picked, job_id="")
+    resolved = _resolve_engine(engine)
+    if isinstance(resolved, dict):
+        return dict(resolved, job_id="")
+
+    ids = [s["id"] for s in picked]
+    job_id = SCREENS.start_job(body.proposal_id, resolved, ids)
+    return {"job_id": job_id, "engine": resolved, "pending": ids, "done": [],
+            "note": "%d screen(s) to build." % len(ids)}
+
+
+class _JobBody(object):
+    """Adapts a job request to the shape the screen builders expect.
+
+    A start request and a step request carry different fields, so everything
+    optional is defaulted here rather than assumed.
+    """
+
+    def __init__(self, body, slot_ids=None):
+        self.data = getattr(body, "data", {})
+        self.proposal_id = getattr(body, "proposal_id", "")
+        self.slot_ids = slot_ids if slot_ids is not None else \
+            getattr(body, "slot_ids", [])
+        self.engine = getattr(body, "engine", "auto")
+        self.brief = getattr(body, "brief", {}) or {}
+        self.have = []
+        self.index = -1
+        self.only_first = False
+        self.replace = getattr(body, "replace", False)
+
+
+@app.post("/api/screens/step")
+def api_job_step(body: JobStepIn, session: str = Cookie(None)):
+    """Do one piece of the job. Short enough that it always finishes."""
+    user = me(session)
+    job = SCREENS.get_job(body.job_id)
+    if not job:
+        raise HTTPException(404, "That build is no longer running.")
+    if job["state"] != "running" or not job["pending"]:
+        SCREENS.update_job(body.job_id, state="finished")
+        return {"done": job["done"], "pending": [], "errors": job["errors"],
+                "finished": True}
+
+    engine = job["engine"]
+    all_slots = {s["id"]: s for s in screen_slots(body.data)}
+    chunk_size = FAST.PER_CALL if engine == "fast" else 1
+    if engine == "v0":
+        chunk_size = len(job["pending"])          # v0 builds the whole set
+    chunk = [all_slots[i] for i in job["pending"][:chunk_size] if i in all_slots]
+    if not chunk:
+        SCREENS.update_job(body.job_id, pending=[], state="finished")
+        return {"done": job["done"], "pending": [], "errors": job["errors"],
+                "finished": True}
+
+    USAGE.set_context(user["id"], job["proposal_id"] or "screens")
+    name = body.data.get("meta", {}).get("project_name", "the app")
+    errors = list(job["errors"])
+    stored = []
+    try:
+        if engine == "v0":
+            return _v0_step(job, body, chunk, name)
+        if engine == "fast":
+            pngs, _ = FAST.build_one_strip(chunk, name)
+            out = _deliver_screens(chunk, pngs, job["proposal_id"], "fast")
+        else:
+            out = _builtin_screens(chunk, _JobBody(
+                body, slot_ids=[s["id"] for s in chunk]))
+        stored = out.get("stored", []) + list(out.get("screens", {}).keys())
+        errors += out.get("errors", [])
+    except Exception as exc:                                  # noqa: BLE001
+        errors.append("%s: %s" % (", ".join(s["id"] for s in chunk),
+                                  str(exc)[:180]))
+
+    handled = {s["id"] for s in chunk}
+    pending = [i for i in job["pending"] if i not in handled]
+    done = list(job["done"]) + stored
+    SCREENS.update_job(body.job_id, pending=pending, done=done, errors=errors,
+                       state="running" if pending else "finished")
+    return {"done": done, "pending": pending, "errors": errors,
+            "finished": not pending, "engine": engine}
+
+
+def _v0_step(job, body, chunk, name):
+    """v0 is started once, then polled. Each call here is a few seconds."""
+    if not job["chat_id"]:
+        started = V0.start_batch(chunk, name)
+        SCREENS.update_job(job["id"], chat_id=started["chat_id"])
+        return {"done": job["done"], "pending": job["pending"],
+                "errors": job["errors"], "finished": False,
+                "status": "v0 is building. This takes 10 to 40 minutes.",
+                "engine": "v0"}
+    out = V0.poll_batch(job["chat_id"], chunk)
+    if not out.get("ready"):
+        return {"done": job["done"], "pending": job["pending"],
+                "errors": job["errors"], "finished": False,
+                "status": out.get("status", "building"), "engine": "v0"}
+    delivered = _deliver_screens(chunk, out["images"], job["proposal_id"], "v0")
+    done = list(job["done"]) + delivered.get("stored", [])
+    SCREENS.update_job(job["id"], pending=[], done=done, state="finished")
+    return {"done": done, "pending": [], "errors": job["errors"],
+            "finished": True, "engine": "v0",
+            "sources": {s["id"]: {"url": out.get("url"), "device": s["device"]}
+                        for s in chunk}}
 
 
 @app.post("/api/screens/v0-start")

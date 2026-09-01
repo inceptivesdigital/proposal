@@ -256,7 +256,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-29.25-no-waste"
+BUILD = "2026-08-29.26-routes"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -667,7 +667,7 @@ def api_screen_put(body: ScreenIn, session: str = Cookie(None)):
         raise HTTPException(400, str(exc))
 
 
-@app.get("/api/screens/{proposal_id}/{slot}")
+@app.get("/api/screens/img/{proposal_id}/{slot}")
 def api_screen_get(proposal_id: str, slot: str):
     """Serve a stored screen, so the browser never holds the image data."""
     got = SCREENS.get(proposal_id, slot)
@@ -685,7 +685,7 @@ def api_screen_list(proposal_id: str, session: str = Cookie(None)):
     return {"screens": SCREENS.listing(proposal_id)}
 
 
-@app.delete("/api/screens/{proposal_id}/{slot}")
+@app.delete("/api/screens/img/{proposal_id}/{slot}")
 def api_screen_delete(proposal_id: str, slot: str, session: str = Cookie(None)):
     me(session)
     SCREENS.delete(proposal_id, slot)
@@ -912,122 +912,6 @@ def _builtin_screens(slots, body):
     out = _deliver_screens(kept, pngs, body.proposal_id, "builtin")
     out["errors"] = errors
     return out
-
-
-@app.get("/api/screens/state/{proposal_id}")
-def api_screen_state(proposal_id: str, session: str = Cookie(None)):
-    """What exists, and what is being built right now."""
-    me(session)
-    return {"have": sorted(SCREENS.slots_present(proposal_id)),
-            "building": SCREENS.running(proposal_id)}
-
-
-@app.post("/api/screens/put")
-def api_screen_put(body: ScreenIn, session: str = Cookie(None)):
-    """Upload one screen. One image per request keeps every request small."""
-    me(session)
-    try:
-        return SCREENS.put(body.proposal_id, body.slot, body.data)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-
-
-@app.get("/api/screens/{proposal_id}/{slot}")
-def api_screen_get(proposal_id: str, slot: str):
-    """Serve a stored screen, so the browser never holds the image data."""
-    got = SCREENS.get(proposal_id, slot)
-    if not got:
-        raise HTTPException(404, "No such screen.")
-    mime, blob = got
-    from fastapi.responses import Response as RawResponse
-    return RawResponse(content=blob, media_type=mime,
-                       headers={"cache-control": "private, max-age=600"})
-
-
-@app.get("/api/screens/list/{proposal_id}")
-def api_screen_list(proposal_id: str, session: str = Cookie(None)):
-    me(session)
-    return {"screens": SCREENS.listing(proposal_id)}
-
-
-@app.delete("/api/screens/{proposal_id}/{slot}")
-def api_screen_delete(proposal_id: str, slot: str, session: str = Cookie(None)):
-    me(session)
-    SCREENS.delete(proposal_id, slot)
-    return {"ok": True}
-
-
-@app.post("/api/screens/v0-start")
-def api_v0_start(body: V0StartIn, session: str = Cookie(None)):
-    """Start a v0 build and return at once. Nothing here waits."""
-    if not V0.configured():
-        raise HTTPException(400, "v0 needs V0_API_KEY plus a screenshot key.")
-    slots = screen_slots(body.data)
-    if body.slot_ids:
-        wanted = set(body.slot_ids)
-        slots = [s for s in slots if s["id"] in wanted]
-    if not slots:
-        raise HTTPException(400, "No screens are needed for this proposal.")
-    u = DB.user_for(session)
-    USAGE.set_context(u["id"] if u else None, "screens")
-    name = body.data.get("meta", {}).get("project_name", "the app")
-    try:
-        started = V0.start_batch(slots, name)
-    except Exception as exc:                                  # noqa: BLE001
-        raise HTTPException(400, str(exc))
-    return {"chat_id": started["chat_id"],
-            "slot_ids": [s["id"] for s in slots],
-            "note": "v0 is building. This usually takes ten to forty minutes."}
-
-
-@app.post("/api/screens/v0-poll")
-def api_v0_poll(body: V0PollIn, session: str = Cookie(None)):
-    """Has it finished? Returns the screens once it has."""
-    slots = screen_slots(body.data)
-    if body.slot_ids:
-        wanted = set(body.slot_ids)
-        slots = [s for s in slots if s["id"] in wanted]
-    u = DB.user_for(session)
-    USAGE.set_context(u["id"] if u else None, "screens")
-    try:
-        out = V0.poll_batch(body.chat_id, slots)
-    except Exception as exc:                                  # noqa: BLE001
-        return {"ready": False, "status": "still building (%s)" % str(exc)[:90]}
-    if not out.get("ready"):
-        return {"ready": False, "status": out.get("status", "building")}
-    screens = {}
-    for slot, png in zip(slots, out["images"]):
-        screens[slot["id"]] = ("data:image/png;base64," +
-                               base64.b64encode(png).decode())
-    stored = []
-    if body.data.get("_proposal_id"):
-        pid = body.data["_proposal_id"]
-        for slot_id, url in list(screens.items()):
-            try:
-                SCREENS.put(pid, slot_id, url)
-                stored.append(slot_id)
-                screens.pop(slot_id)
-            except Exception:                                 # noqa: BLE001
-                pass
-    return {"ready": True, "screens": screens, "stored": stored,
-            "count": len(stored) + len(screens), "url": out.get("url")}
-
-
-@app.post("/api/screens-recover")
-def api_screens_recover(body: RecoverIn):
-    """Re-photograph builds that already exist. No model call, no credits."""
-    out, errors = {}, []
-    for slot_id, src in (body.sources or {}).items():
-        try:
-            url = src.get("url")
-            if not url and src.get("chat_id"):
-                url = V0.preview_for_chat(src["chat_id"])
-            png = V0.refetch(url, src.get("device", "phone"))
-            out[slot_id] = ("data:image/png;base64," +
-                            base64.b64encode(png).decode())
-        except Exception as exc:                              # noqa: BLE001
-            errors.append("%s: %s" % (slot_id, exc))
-    return {"screens": out, "count": len(out), "errors": errors}
 
 
 @app.post("/api/screen-slots")

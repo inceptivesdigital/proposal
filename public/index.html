@@ -446,6 +446,7 @@
       <option value="none">No screens at all</option></select>
     <button id="btnTestKeys">Test keys</button>
   </div>
+  <p class="hint" id="screenState" style="margin:0 0 14px"></p>
   <div class="field">
     <p class="lab">Build only certain screens</p>
     <div style="display:flex;gap:9px;align-items:center">
@@ -514,7 +515,13 @@ const api = async (url, body) => {
       ? 'That step took longer than the server allows.'
       : 'Server returned ' + r.status + (text ? ': ' + text.slice(0, 200) : ''));
   }
-  if (!r.ok) throw new Error(j.error || j.detail || ('Server returned ' + r.status));
+  if (!r.ok) {
+    let msg = j.error || j.detail || ('Server returned ' + r.status);
+    if (Array.isArray(msg))            // a validation error from the server
+      msg = msg.map(e => (e.loc || []).slice(1).join('.') + ': ' + e.msg)
+               .join('; ');
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
   return j;
 };
 
@@ -1122,11 +1129,16 @@ $('#btnGenerate').onclick = async () => {
     const r = await api('/api/technical', {brief: b.brief, front: f.front,
                         features: feats.features, meta, milestones, total_value});
     progress('Building the pages', 'Drawing the pages at print resolution', 94, 6);
+    if (!r.data || !r.data.meta)
+      throw new Error('The proposal came back incomplete. Try again, and if it '
+                    + 'keeps happening, shorten the transcript.');
     newDoc(r.data, meta.project_name);
     try {
       const created = await api('/api/proposals', {data: r.data});
       pid = created.id;
-    } catch (e) { /* unsaved, but still editable */ }
+      await loadScreenIndex();
+    } catch (e) { toast('Generated, but not saved to your account yet: '
+                      + e.message, 'err'); }
     progressDone('Proposal generated and saved to your account. '
                + 'Review the layout checks, then add the UI screens.');
     if ((r.warnings||[]).length) toast(r.warnings.join(' '), 'err');
@@ -1399,7 +1411,8 @@ $('#btnPdf').onclick = async () => {
 
 // screens live on the server; the browser only ever knows their names
 const screenUrl = slot =>
-  '/api/screens/' + encodeURIComponent(pid || '') + '/' + encodeURIComponent(slot)
+  '/api/screens/img/' + encodeURIComponent(pid || '') + '/'
+  + encodeURIComponent(slot)
   + '?v=' + ((doc.screens || {})[slot] || '');
 
 async function putScreen(slot, dataUrl){
@@ -1535,7 +1548,7 @@ function drawScreenList(){
       const again = document.createElement('button'); again.className='ghost';
       again.textContent='Replace this one';
       again.onclick = async () => {
-        if (pid) await fetch('/api/screens/' + pid + '/' + slot.id,
+        if (pid) await fetch('/api/screens/img/' + pid + '/' + slot.id,
                              {method:'DELETE'}).catch(()=>{});
         delete doc.screens[slot.id]; persist();
         runScreens('pick', [idx + 1]);
@@ -1744,7 +1757,8 @@ function lockScreenButtons(on){
   ['btnGenScreens', 'btnScratch', 'btnPickBuild'].forEach(id => {
     const b = $('#' + id); if (b) b.disabled = on;
   });
-  $('#btnGenScreens').textContent = on ? 'Building…' : 'Generate missing screens';
+  const gen = $('#btnGenScreens');
+  if (gen) gen.textContent = on ? 'Building\u2026' : 'Generate missing screens';
 }
 
 $('#btnGenScreens').onclick = () => runScreens('fill');
@@ -1759,17 +1773,19 @@ $('#btnScratch').onclick = () => {
 
 // what exists and what is in flight, straight from the server
 async function refreshScreenState(){
-  if (!pid) { $('#screenState').textContent = 'Save this proposal to keep its screens.'; return; }
+  const box = $('#screenState');
+  if (!box) return;                 // never throw over a missing status line
+  if (!pid) { box.textContent = 'Save this proposal to keep its screens.'; return; }
   try {
     const s = await (await fetch('/api/screens/state/' + pid)).json();
     const total = screenSlots().length;
     const busy = (s.building || []).length;
-    $('#screenState').textContent =
-      s.have.length + ' of ' + total + ' screens in place'
+    box.textContent = (s.have || []).length + ' of ' + total
+      + ' screens in place'
       + (busy ? ' \u00b7 ' + busy + ' being built right now' : '')
       + '. Generating only builds what is missing.';
     if (busy) lockScreenButtons(true);
-  } catch (e) { $('#screenState').textContent = ''; }
+  } catch (e) { box.textContent = ''; }
 }
 $('#btnPickBuild').onclick = () => {
   const nums = ($('#pickNumbers').value || '').split(/[^0-9]+/)

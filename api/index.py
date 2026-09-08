@@ -12,7 +12,7 @@ import tempfile
 import sys
 import tempfile
 
-from fastapi import Cookie, FastAPI, HTTPException, Response
+from fastapi import Cookie, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -37,7 +37,11 @@ from renderer import mailer as MAIL               # noqa: E402
 from renderer import sql as SQL                   # noqa: E402
 from renderer import documents as DOCS            # noqa: E402
 from renderer import screenstore as SCREENS       # noqa: E402
-from renderer.model import CURRENCIES             # noqa: E402
+from renderer import signatures as SIGN            # noqa: E402
+from renderer import signwell as SIGNER            # noqa: E402
+from renderer import contracts as CONTRACTS        # noqa: E402
+from renderer.model import (                     # noqa: E402
+    CURRENCIES, check_milestones, currency_of)
 
 PUBLIC = os.path.join(ROOT, "public")
 app = FastAPI(title="Inceptives Digital Proposal Studio", docs_url=None,
@@ -256,7 +260,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-30.1-screen-jobs"
+BUILD = "2026-08-30.4-production"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -348,6 +352,13 @@ def production_warnings():
                    "instead of emailed.")
     for problem in MAIL.check()["problems"]:
         out.append("Email: %s" % problem)
+    if not SIGNER.configured():
+        out.append("SIGNWELL_API_KEY is not set, so proposals cannot be sent "
+                   "for signature.")
+    elif SIGNER.TEST_MODE:
+        out.append("SignWell is in test mode: documents are watermarked and "
+                   "only reach your own domain. Set SIGNWELL_TEST_MODE=0 for "
+                   "real contracts.")
     if os.environ.get("COOKIE_SECURE", "0") != "1":
         out.append("COOKIE_SECURE is not 1, so session cookies are sent over "
                    "plain HTTP as well as HTTPS.")
@@ -411,6 +422,9 @@ def health():
         "files": _file_check(),
         "tables": SQL.table_check(),
         "mail": MAIL.check(),
+        "contracts_from": MAIL.CONTRACTS_FROM,
+        "signing": {"provider": SIGNER.NAME, "configured": SIGNER.configured(),
+                    "test_mode": SIGNER.TEST_MODE},
         "mail_configured": MAIL.configured(),
         "warnings": production_warnings(),
         "staged_endpoints": True,
@@ -521,6 +535,273 @@ def _need_key():
 
 # Generation runs as three requests rather than one, because three model calls
 # in a single request exceed the platform's 60 second limit and return a 504.
+# --------------------------------------------------------------- signatures
+class SignatureIn(BaseModel):
+    kind: str = "drawn"
+    data: str = ""
+    text: str = ""
+    name: str = ""
+    role: str = ""
+
+
+@app.get("/api/signature")
+def api_signature_get(session: str = Cookie(None)):
+    user = me(session)
+    row = SIGN.get(user["id"])
+    if not row:
+        return {"signature": None}
+    return {"signature": {"kind": row["kind"], "name": row["name"],
+                          "role": row["role"], "at": row["at"],
+                          "image": "data:image/png;base64," + row["data"]}}
+
+
+@app.post("/api/signature")
+def api_signature_set(body: SignatureIn, session: str = Cookie(None)):
+    """Set it once; it is reused on every proposal after that."""
+    user = me(session)
+    data_url = body.data
+    if body.kind == "typed":
+        if not body.text.strip():
+            raise HTTPException(400, "Type the name you want to sign with.")
+        data_url = SIGN.typed_image(body.text.strip())
+    if not data_url:
+        raise HTTPException(400, "No signature was supplied.")
+    try:
+        out = SIGN.save(user["id"], body.kind, data_url,
+                        body.name or user["name"], body.role)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    DB.note_activity(user["id"], user["email"], "set their signature",
+                     body.kind)
+    return out
+
+
+@app.delete("/api/signature")
+def api_signature_delete(session: str = Cookie(None)):
+    user = me(session)
+    SIGN.delete(user["id"])
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- contracts
+class SignIn(BaseModel):
+    proposal_id: str
+    data: dict
+
+
+class SendIn(BaseModel):
+    contract_id: str
+    via: str = "signer"          # signer | our_email | both
+    subject: str = ""
+    message: str = ""
+
+
+@app.post("/api/contracts/sign")
+def api_contract_sign(body: SignIn, session: str = Cookie(None)):
+    """The sender signs in the studio. Nothing leaves the building yet."""
+    user = me(session)
+    if not SIGN.get(user["id"]):
+        raise HTTPException(400, "Set up your signature first, under your "
+                                 "name in the top right.")
+    meta = body.data.get("meta") or {}
+    if not meta.get("client_email"):
+        raise HTTPException(400, "Add the client's email address before "
+                                 "signing, so the proposal can be sent.")
+    try:
+        loaded = DB.load(body.proposal_id, user["id"])
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    cid = CONTRACTS.create(body.proposal_id, loaded["version"], user,
+                           body.data, state="signed_by_user")
+    CONTRACTS.update(cid, signed_by_user_at=CONTRACTS._now())
+    CONTRACTS.add_event(cid, user["email"], "signed in the studio")
+    DB.note_activity(user["id"], user["email"], "signed a proposal",
+                     meta.get("project_name", ""), body.proposal_id)
+    return {"contract_id": cid, "state": "signed_by_user",
+            "note": "Signed. Now choose how the client receives it."}
+
+
+@app.post("/api/contracts/send")
+def api_contract_send(body: SendIn, session: str = Cookie(None)):
+    """Send it, by the signing service, by your own mail server, or both."""
+    user = me(session)
+    row = CONTRACTS.get(body.contract_id)
+    if not row:
+        raise HTTPException(404, "No such contract.")
+    if row["user_id"] != user["id"] and not DB.is_admin(user):
+        raise HTTPException(403, "That contract belongs to someone else.")
+
+    loaded = DB.load(row["proposal_id"], row["user_id"])
+    data = loaded["data"]
+    sig_path = SIGN.to_file(user["id"], os.path.join(tempfile.gettempdir(),
+                                                     "proposal_sigs"))
+    data["_signature"] = {"path": sig_path,
+                          "signed_at": row["signed_by_user_at"]}
+    data["_sign_tag"] = "[sig:client]  [date:client]"
+    pdf, _meta = render_pdf(data, screens_for(row["proposal_id"]))
+
+    subject = body.subject or ("%s from Inceptives Digital"
+                               % (row["project_name"] or "Your proposal"))
+    message = body.message or _default_message(row)
+    via = body.via if body.via in ("signer", "our_email", "both") else "signer"
+
+    doc = None
+    if not row["document_id"]:
+        try:
+            doc = SIGNER.send(pdf, "%s.pdf" % (row["project_name"] or "Proposal"),
+                              row["client_name"] or "Client", row["client_email"],
+                              subject, message,
+                              send_email=via in ("signer", "both"),
+                              sender_name="Inceptives Digital",
+                              reply_to=MAIL.CONTRACTS_FROM)
+        except Exception as exc:                              # noqa: BLE001
+            raise HTTPException(400, str(exc))
+        CONTRACTS.update(body.contract_id, provider=SIGNER.NAME,
+                         document_id=doc["id"], link=doc["link"])
+        row = CONTRACTS.get(body.contract_id)
+    elif via in ("signer", "both"):
+        try:
+            SIGNER.remind(row["document_id"])
+        except Exception as exc:                              # noqa: BLE001
+            raise HTTPException(400, str(exc))
+
+    problems = []
+    if via in ("our_email", "both"):
+        try:
+            MAIL.send_contract(row["client_email"], row["client_name"],
+                               subject, message, row["link"])
+            CONTRACTS.add_event(body.contract_id, row["client_email"],
+                                "emailed from %s" % MAIL.CONTRACTS_FROM)
+        except Exception as exc:                              # noqa: BLE001
+            problems.append(str(exc)[:200])
+    if via in ("signer", "both"):
+        CONTRACTS.add_event(body.contract_id, row["client_email"],
+                            "emailed by %s" % SIGNER.NAME)
+
+    CONTRACTS.update(body.contract_id, state="sent", sent_via=via,
+                     subject=subject, message=message,
+                     sent_at=row["sent_at"] or CONTRACTS._now())
+    DB.note_activity(user["id"], user["email"], "sent a proposal for signature",
+                     "%s to %s via %s" % (row["project_name"],
+                                          row["client_email"], via),
+                     row["proposal_id"])
+    return {"contract": CONTRACTS.get(body.contract_id), "problems": problems,
+            "link": CONTRACTS.get(body.contract_id)["link"]}
+
+
+def _default_message(row):
+    return ("Hello %s,\n\nHere is the proposal for %s, ready for your "
+            "signature. It is already signed by us.\n\nIf anything needs "
+            "changing before you sign, reply to this message and we will sort "
+            "it out.\n\nThank you,\n%s\nInceptives Digital"
+            % (row["client_name"] or "there",
+               row["project_name"] or "your project",
+               row["user_name"] or ""))
+
+
+@app.get("/api/contracts")
+def api_contracts(mine: int = 1, session: str = Cookie(None)):
+    """A person's own contracts, or everyone's for an administrator."""
+    user = me(session)
+    everyone = not mine and DB.is_admin(user)
+    rows = CONTRACTS.listing(None if everyone else user["id"])
+    return {"contracts": rows,
+            "totals": CONTRACTS.totals(None if everyone else user["id"]),
+            "scope": "all" if everyone else "mine"}
+
+
+@app.get("/api/contracts/{cid}")
+def api_contract(cid: str, session: str = Cookie(None)):
+    user = me(session)
+    row = CONTRACTS.get(cid)
+    if not row:
+        raise HTTPException(404, "No such contract.")
+    if row["user_id"] != user["id"] and not DB.is_admin(user):
+        raise HTTPException(403, "That contract belongs to someone else.")
+    return {"contract": row}
+
+
+@app.post("/api/contracts/{cid}/refresh")
+def api_contract_refresh(cid: str, session: str = Cookie(None)):
+    """Ask the signing service where this document has got to."""
+    user = me(session)
+    row = CONTRACTS.get(cid)
+    if not row or not row["document_id"]:
+        raise HTTPException(404, "That contract has not been sent yet.")
+    try:
+        state = SIGNER.status(row["document_id"])
+        trail = SIGNER.audit_trail(row["document_id"])
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+    _absorb(cid, state, trail)
+    return {"contract": CONTRACTS.get(cid)}
+
+
+def _absorb(cid, state, trail):
+    """Fold the service's view of a document into our record."""
+    mapped = {"sent": "sent", "viewed": "viewed", "completed": "completed",
+              "declined": "declined"}.get(state.get("status", ""), None)
+    fields = {"trail": trail}
+    if mapped:
+        fields["state"] = mapped
+    for event in trail:
+        if event["what"] == "viewed" and not CONTRACTS.get(cid)["viewed_at"]:
+            fields["viewed_at"] = event["at"]
+        if event["what"] == "signed":
+            fields["completed_at"] = event["at"]
+            fields["state"] = "completed"
+        if event["what"] == "declined":
+            fields["declined_at"] = event["at"]
+            fields["state"] = "declined"
+    CONTRACTS.update(cid, **fields)
+    if fields.get("state") == "completed":
+        try:
+            row = CONTRACTS.get(cid)
+            CONTRACTS.store_signed_pdf(cid, SIGNER.signed_pdf(row["document_id"]))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+
+@app.get("/api/contracts/{cid}/signed.pdf")
+def api_signed_pdf(cid: str, session: str = Cookie(None)):
+    user = me(session)
+    row = CONTRACTS.get(cid)
+    if not row:
+        raise HTTPException(404, "No such contract.")
+    if row["user_id"] != user["id"] and not DB.is_admin(user):
+        raise HTTPException(403, "That contract belongs to someone else.")
+    blob = CONTRACTS.signed_pdf(cid)
+    if not blob:
+        raise HTTPException(404, "The signed copy is not here yet. Refresh the "
+                                 "contract once the client has signed.")
+    from fastapi.responses import Response as RawResponse
+    return RawResponse(content=blob, media_type="application/pdf",
+                       headers={"content-disposition":
+                                'attachment; filename="%s signed.pdf"'
+                                % (row["project_name"] or "Proposal")})
+
+
+@app.post("/api/webhooks/signwell")
+async def api_signwell_webhook(request: Request):
+    """Status straight from the signing service, so nothing has to be polled."""
+    try:
+        payload = await request.json()
+    except Exception:                                         # noqa: BLE001
+        return {"ok": True}
+    doc = (payload.get("data") or {}).get("object") or payload.get("document") \
+        or payload
+    document_id = doc.get("id") or ""
+    row = CONTRACTS.by_document(document_id) if document_id else None
+    if not row:
+        return {"ok": True}
+    try:
+        _absorb(row["id"], SIGNER.status(document_id),
+                SIGNER.audit_trail(document_id))
+    except Exception:                                         # noqa: BLE001
+        pass
+    return {"ok": True}
+
+
 @app.get("/api/currencies")
 def api_currencies():
     """The currencies a proposal can be priced in."""
@@ -1477,12 +1758,40 @@ def api_chat(body: ChatIn, session: str = Cookie(None)):
                 _at(body.data, path), _at(data, path), body.instruction)
             if r.get("is_rule"):
                 rule = r
+    money = _money_changes(body.data, data)
     if user:
         DB.note_activity(user["id"], user["email"], "asked the assistant",
                          body.instruction[:160], body.proposal_id or "")
+        for line in money:
+            DB.note_activity(user["id"], user["email"], "changed money", line,
+                             body.proposal_id or "")
+    ok, total, summed, warning = check_milestones(
+        data.get("page12", {}), data.get("meta", {}).get("region", "US"),
+        currency_of(data))
     return {"data": data, "applied": applied, "note": out["note"],
             "answer": out.get("answer", ""), "ops": out["ops"],
-            "learned": learned, "rule": rule}
+            "learned": learned, "rule": rule, "money": money,
+            "milestones_ok": ok, "milestone_warning": warning}
+
+
+def _money_changes(before, after):
+    """Every figure that moved, in words, so nothing slips through quietly."""
+    from renderer.model import money as fmt
+    cur = currency_of(after)
+    out = []
+    old_total = (before.get("page12") or {}).get("total_value")
+    new_total = (after.get("page12") or {}).get("total_value")
+    if old_total != new_total:
+        out.append("Total: %s to %s" % (fmt(old_total, cur), fmt(new_total, cur)))
+    old_rows = (before.get("page12") or {}).get("rows") or []
+    new_rows = (after.get("page12") or {}).get("rows") or []
+    for i, row in enumerate(new_rows):
+        was = old_rows[i].get("amount") if i < len(old_rows) else None
+        now = row.get("amount")
+        if was != now:
+            out.append("%s: %s to %s" % (row.get("title", "Milestone %d" % (i+1)),
+                                         fmt(was, cur), fmt(now, cur)))
+    return out
 
 
 def _pictures_for(data, ctx, proposal_id, pad=26.0):
@@ -1581,6 +1890,9 @@ def api_admin_overview(session: str = Cookie(None)):
         "recent": _safe("recent calls", USAGE.recent, []),
         "users": _safe("people", DB.users, []),
         "rules": _safe("rules", LEARN.rules, []),
+        "contracts": _safe("contracts", lambda: CONTRACTS.listing(None, 300), []),
+        "contract_totals": _safe("contract totals",
+                                 lambda: CONTRACTS.totals(None), {}),
         "activity": _safe("activity", lambda: DB.activity(120), []),
         "activity_by_user": _safe("activity summary", DB.activity_summary, []),
         "errors": [],
@@ -1645,6 +1957,7 @@ def api_credits():
                            "credit" in text.lower() or "429" in text
                            else text[:220])}
     out["screens"] = V0.test_keys()
+    out["signing"] = SIGNER.check()
     out["spend"] = {"total": USAGE.totals().get("cost", 0),
                     "average_proposal": USAGE.average_proposal_cost()}
     return out

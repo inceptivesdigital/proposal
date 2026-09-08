@@ -279,9 +279,12 @@
     <div class="btnwrap"><button id="btnSave">Save</button><span class="hint">Keep this version</span></div>
     <div class="btnwrap"><button id="btnPdf">Download PDF</button><span class="hint">Export the finished file</span></div>
     <div class="btnwrap"><button class="primary" id="btnPublish">Publish</button><span class="hint">Lock a version for the client</span></div>
+    <div class="btnwrap"><button id="btnSign">Sign &amp; send</button><span class="hint">Sign it, then send to the client</span></div>
+    <div class="btnwrap"><button id="btnDocs">Documents</button><span class="hint">What you have sent</span></div>
     <div class="btnwrap"><button id="btnCredits">API health</button><span class="hint">Check keys and credit</span></div>
     <div class="btnwrap" id="adminWrap" style="display:none"><button id="btnAdmin">Admin</button><span class="hint">Usage, costs and people</span></div>
-    <div class="avatar" id="avatar">HS</div>
+    <div class="avatar" id="avatar" title="Your signature"
+         style="cursor:pointer">HS</div>
   </header>
 
   <div class="body">
@@ -401,6 +404,8 @@
   <div class="grid2">
     <div class="field"><p class="lab">Client contact</p><input id="nContact"></div>
     <div class="field"><p class="lab">Client company</p><input id="nCompany"></div>
+    <div class="field"><p class="lab">Client email</p>
+      <input id="nEmail" type="email" placeholder="needed to send for signature"></div>
     <div class="field"><p class="lab">Project name</p><input id="nProject"></div>
     <div class="field"><p class="lab">Governing law</p><select id="nRegion">
       <option value="US">United States — State of Texas</option>
@@ -476,6 +481,51 @@
 
 <dialog id="dlgCredits"><h3>API health</h3><div class="in" id="creditsBody"></div>
   <footer><button onclick="dlgCredits.close()">Close</button></footer></dialog>
+
+<dialog id="dlgSignature" style="width:min(560px,94vw)">
+  <h3>Your signature</h3><div class="in">
+  <p class="lab">Set this up once. It is applied to every proposal you sign,
+    and never leaves your account.</p>
+  <div class="tabs" style="position:static;padding:0;margin-bottom:14px">
+    <button class="on" data-sig="drawn">Draw it</button>
+    <button data-sig="typed">Type it</button>
+    <button data-sig="uploaded">Upload an image</button>
+  </div>
+  <div id="sigDrawn">
+    <canvas id="sigPad" width="640" height="200"
+      style="width:100%;height:170px;border:1px dashed var(--line);
+             border-radius:11px;background:#fff;touch-action:none"></canvas>
+    <p class="lab" style="margin-top:7px">Draw with a mouse, trackpad or finger.
+      <a href="#" id="sigClear" style="color:var(--blue)">Clear</a></p>
+  </div>
+  <div id="sigTyped" style="display:none">
+    <div class="field"><p class="lab">Your name</p>
+      <input id="sigText" placeholder="Hannan Shahnoor"></div>
+  </div>
+  <div id="sigUpload" style="display:none">
+    <div class="field"><p class="lab">A photograph or scan of your signature</p>
+      <input type="file" id="sigFile" accept="image/png,image/jpeg"></div>
+    <p class="lab">A dark signature on white paper works best.</p>
+  </div>
+  <div class="field"><p class="lab">Your job title, as it should appear</p>
+    <input id="sigRole" placeholder="Account Strategist"></div>
+  <div id="sigPreview"></div>
+</div><footer>
+  <button onclick="dlgSignature.close()">Cancel</button>
+  <button class="ghost" id="btnSigRemove" style="color:var(--red)">Remove</button>
+  <button class="primary" id="btnSigSave">Save signature</button>
+</footer></dialog>
+
+<dialog id="dlgSend" style="width:min(620px,94vw)">
+  <h3>Send for signature</h3><div class="in" id="sendBody"></div>
+  <footer>
+    <button onclick="dlgSend.close()">Close</button>
+    <button class="primary" id="btnDoSend">Send</button>
+  </footer></dialog>
+
+<dialog id="dlgDocs" style="width:min(1120px,96vw)">
+  <h3>Documents</h3><div class="in" id="docsBody"></div>
+  <footer><button onclick="dlgDocs.close()">Close</button></footer></dialog>
 
 <dialog id="dlgRewrite"><h3>Rewrite selection</h3><div class="in">
   <p class="lab" id="rwPath"></p>
@@ -1102,6 +1152,7 @@ $('#nMilestones').oninput = $('#nTotal').oninput = () => {
 $('#btnGenerate').onclick = async () => {
   const meta = {client_contact:$('#nContact').value, client_company:$('#nCompany').value,
     project_name:$('#nProject').value, region:$('#nRegion').value,
+    client_email:($('#nEmail').value || '').trim(),
     currency:$('#nCurrency').value || 'USD',
     signer_name:$('#nSigner').value, signer_role:$('#nRole').value,
     date: new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})};
@@ -1989,6 +2040,9 @@ async function runNote(i){
                                       context: ctx});
     progressDone();
     if (!r.applied) return toast(r.note || 'Nothing was changed.', 'err');
+    (r.money || []).forEach(line => toast('Money changed \u2014 ' + line));
+    if (r.money && r.money.length && !r.milestones_ok)
+      toast(r.milestone_warning, 'err');
     n.done = true;
     n.before = before;                 // one-click undo for this comment alone
     n.ranAt = stamp();
@@ -1998,6 +2052,345 @@ async function runNote(i){
     toast(r.note || 'Change applied.');
   } catch (e) { progressDone(); toast(e.message, 'err'); }
 }
+
+// ------------------------------------------------------------- signatures
+let sigMode = 'drawn', sigDataUrl = '';
+
+document.querySelectorAll('[data-sig]').forEach(b => b.onclick = () => {
+  sigMode = b.dataset.sig;
+  document.querySelectorAll('[data-sig]').forEach(x =>
+    x.classList.toggle('on', x === b));
+  $('#sigDrawn').style.display  = sigMode === 'drawn' ? '' : 'none';
+  $('#sigTyped').style.display  = sigMode === 'typed' ? '' : 'none';
+  $('#sigUpload').style.display = sigMode === 'uploaded' ? '' : 'none';
+});
+
+(function setUpPad(){
+  const pad = $('#sigPad');
+  if (!pad || typeof pad.getContext !== 'function') return;   // no canvas, no pad
+  const ctx = pad.getContext('2d');
+  ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#12151c';
+  let drawing = false;
+  const at = e => {
+    const r = pad.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return [(p.clientX - r.left) * pad.width / r.width,
+            (p.clientY - r.top) * pad.height / r.height];
+  };
+  const down = e => { drawing = true; ctx.beginPath();
+                      ctx.moveTo(...at(e)); e.preventDefault(); };
+  const move = e => { if (!drawing) return;
+                      ctx.lineTo(...at(e)); ctx.stroke(); e.preventDefault(); };
+  const up = () => { drawing = false; sigDataUrl = pad.toDataURL('image/png'); };
+  pad.addEventListener('mousedown', down); pad.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+  pad.addEventListener('touchstart', down); pad.addEventListener('touchmove', move);
+  window.addEventListener('touchend', up);
+  $('#sigClear').onclick = e => { e.preventDefault();
+    ctx.clearRect(0, 0, pad.width, pad.height); sigDataUrl = ''; };
+})();
+
+$('#sigFile').onchange = () => {
+  const f = $('#sigFile').files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { sigDataUrl = rd.result;
+    $('#sigPreview').innerHTML = '';
+    const img = document.createElement('img'); img.src = rd.result;
+    img.style.cssText = 'max-height:80px;margin-top:10px';
+    $('#sigPreview').append(img); };
+  rd.readAsDataURL(f);
+};
+
+async function openSignature(){
+  try {
+    const j = await (await fetch('/api/signature')).json();
+    $('#sigPreview').innerHTML = '';
+    if (j.signature) {
+      $('#sigRole').value = j.signature.role || '';
+      const img = document.createElement('img'); img.src = j.signature.image;
+      img.style.cssText = 'max-height:80px;margin-top:10px';
+      const p = document.createElement('p'); p.className = 'lab';
+      p.textContent = 'Set up ' + j.signature.at + ', ' + j.signature.kind + '.';
+      $('#sigPreview').append(p, img);
+    }
+  } catch (e) {}
+  dlgSignature.showModal();
+}
+$('#btnSigSave').onclick = async () => {
+  try {
+    await api('/api/signature', {kind: sigMode, data: sigDataUrl,
+                                 text: $('#sigText').value,
+                                 role: $('#sigRole').value});
+    dlgSignature.close();
+    toast('Signature saved. It will be applied whenever you sign a proposal.');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('#btnSigRemove').onclick = async () => {
+  await fetch('/api/signature', {method:'DELETE'});
+  dlgSignature.close(); toast('Signature removed.');
+};
+
+// --------------------------------------------------------------- contracts
+let currentContract = null;
+
+$('#btnSign').onclick = async () => {
+  if (!pid) return toast('Save this proposal first.', 'err');
+  const email = (data().meta || {}).client_email;
+  if (!email) {
+    const given = prompt('The client\u2019s email address, so they can sign:');
+    if (!given) return;
+    commit(d => { d.meta.client_email = given.trim(); }, 'client email');
+  }
+  try {
+    const r = await api('/api/contracts/sign', {proposal_id: pid, data: data()});
+    currentContract = r.contract_id;
+    toast(r.note);
+    openSend(r.contract_id);
+  } catch (e) {
+    if (/signature first/i.test(e.message)) { toast(e.message, 'err');
+                                              return openSignature(); }
+    toast(e.message, 'err');
+  }
+};
+
+async function openSend(cid){
+  const host = $('#sendBody');
+  host.innerHTML = '<p class="empty">Loading\u2026</p>';
+  dlgSend.showModal();
+  const j = await (await fetch('/api/contracts/' + cid)).json();
+  const k = j.contract;
+  currentContract = cid;
+  host.innerHTML = '';
+
+  const who = document.createElement('div');
+  who.className = 'sel';
+  who.innerHTML = '<div class="k">Sending to</div><b></b><code></code>';
+  who.querySelector('b').textContent = k.client_name || 'the client';
+  who.querySelector('code').textContent = k.client_email;
+  host.append(who);
+
+  const f1 = document.createElement('div'); f1.className = 'field';
+  f1.innerHTML = '<p class="lab">Subject</p>';
+  const subj = document.createElement('input');
+  subj.id = 'sendSubject';
+  subj.value = k.subject || ((k.project_name || 'Your proposal')
+             + ' from Inceptives Digital');
+  f1.append(subj); host.append(f1);
+
+  const f2 = document.createElement('div'); f2.className = 'field';
+  f2.innerHTML = '<p class="lab">Message</p>';
+  const msg = document.createElement('textarea');
+  msg.id = 'sendMessage'; msg.rows = 5;
+  msg.value = k.message || ('Hello ' + (k.client_name || 'there')
+    + ',\n\nHere is the proposal for ' + (k.project_name || 'your project')
+    + ', ready for your signature. It is already signed by us.'
+    + '\n\nIf anything needs changing before you sign, reply to this message '
+    + 'and we will sort it out.\n\nThank you,\n' + (k.user_name || ''));
+  f2.append(msg); host.append(f2);
+
+  const h2 = document.createElement('div'); h2.className = 'sect';
+  h2.textContent = 'How should it reach them?';
+  host.append(h2);
+  const note = document.createElement('p'); note.className = 'lab';
+  note.textContent = 'Either can land in spam, so pick whichever has worked '
+    + 'for this client before, or send both and let them use whichever arrives.';
+  host.append(note);
+
+  const fromAddress = (window.__engines || {}).contracts_from
+                    || 'your own mailbox';
+  [['signer', 'Through the signing service',
+    'Comes from SignWell, with the signing link built in.'],
+   ['our_email', 'From ' + fromAddress,
+    'Comes from your own domain, so it looks like the rest of your email.'],
+   ['both', 'Both', 'Two emails, one from each. Best when a client has missed '
+    + 'one before.']].forEach(([value, title, why], i) => {
+    const el = document.createElement('label');
+    el.className = 'item';
+    el.style.cssText += ';display:flex;gap:10px;align-items:flex-start;cursor:pointer';
+    const radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'sendvia'; radio.value = value;
+    radio.checked = i === 0; radio.style.cssText = 'width:auto;margin-top:3px';
+    const txt = document.createElement('div');
+    txt.innerHTML = '<b style="font-size:13px"></b>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:2px"></div>';
+    txt.querySelector('b').textContent = title;
+    txt.querySelector('div').textContent = why;
+    el.append(radio, txt); host.append(el);
+  });
+
+  if (k.link) {
+    const linkBox = document.createElement('div');
+    linkBox.className = 'note'; linkBox.style.marginTop = '14px';
+    linkBox.innerHTML = '<div><b>Signing link</b>Send this yourself if you would '
+      + 'rather, for example on WhatsApp.</div>';
+    const copy = document.createElement('button');
+    copy.textContent = 'Copy link'; copy.style.marginTop = '8px';
+    copy.onclick = () => { navigator.clipboard.writeText(k.link);
+                           toast('Signing link copied.'); };
+    linkBox.append(copy); host.append(linkBox);
+    $('#btnDoSend').textContent = 'Send again';
+  } else {
+    $('#btnDoSend').textContent = 'Send';
+  }
+}
+
+$('#btnDoSend').onclick = async () => {
+  const via = (document.querySelector('input[name=sendvia]:checked') || {}).value
+            || 'signer';
+  $('#btnDoSend').disabled = true;
+  try {
+    const r = await api('/api/contracts/send', {
+      contract_id: currentContract, via,
+      subject: ($('#sendSubject') || {}).value || '',
+      message: ($('#sendMessage') || {}).value || ''});
+    dlgSend.close();
+    if ((r.problems || []).length)
+      toast('Sent, but: ' + r.problems[0], 'err');
+    else toast('Sent to the client. You can track it under Documents.');
+  } catch (e) { toast(e.message, 'err'); }
+  $('#btnDoSend').disabled = false;
+};
+
+// ---------------------------------------------------------- documents table
+const STATE_LABEL = {draft: 'Draft', signed_by_user: 'Signed by you',
+  sent: 'Sent', viewed: 'Viewed', completed: 'Completed',
+  declined: 'Declined'};
+const STATE_TONE = {completed: 'var(--green)', declined: 'var(--red)',
+  sent: 'var(--blue)', viewed: 'var(--blue)', signed_by_user: 'var(--amber)',
+  draft: 'var(--faint)'};
+
+function contractsTable(host, rows, opts){
+  opts = opts || {};
+  const money = (n, cur) => n == null ? '—'
+    : (cur ? cur + ' ' : '') + Number(n).toLocaleString();
+  const t = document.createElement('table');
+  t.style.cssText = 'width:100%;border-collapse:collapse;font-size:12.5px';
+  const cols = ['Project', 'Client', opts.showUser ? 'Sent by' : null, 'Total',
+                'First payment', 'State', 'Signed by us', 'Sent', 'Completed',
+                ''].filter(Boolean);
+  t.innerHTML = '<thead><tr>' + cols.map(x =>
+    '<th style="text-align:left;padding:8px 9px;border-bottom:1px solid '
+    + 'var(--line);color:var(--muted);font-weight:600">' + x + '</th>').join('')
+    + '</tr></thead>';
+  const body = document.createElement('tbody');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="' + cols.length + '" class="empty">'
+      + 'Nothing sent for signature yet.</td></tr>';
+  }
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const cells = [
+      r.project_name || '—',
+      (r.client_name || '') + (r.client_company ? ' · ' + r.client_company : '')
+        + '\n' + (r.client_email || ''),
+      opts.showUser ? (r.user_name || r.user_email || '—') : null,
+      money(r.total, r.currency),
+      money(r.initial, r.currency),
+      {state: r.state},
+      (r.signed_by_user_at || '—'),
+      (r.sent_at || '—'),
+      (r.completed_at || r.declined_at || '—'),
+      {actions: r},
+    ].filter(x => x !== null);
+    cells.forEach(v => {
+      const td = document.createElement('td');
+      td.style.cssText = 'padding:8px 9px;border-bottom:1px solid var(--line);'
+        + 'vertical-align:top;white-space:pre-line';
+      if (v && v.state) {
+        const pill = document.createElement('span');
+        pill.style.cssText = 'font-size:11px;border-radius:99px;padding:2px 9px;'
+          + 'color:#fff;background:' + (STATE_TONE[v.state] || 'var(--faint)');
+        pill.textContent = STATE_LABEL[v.state] || v.state;
+        td.append(pill);
+      } else if (v && v.actions) {
+        const row = v.actions;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap';
+        if (row.link) {
+          const copy = document.createElement('button');
+          copy.className = 'ghost'; copy.textContent = 'Copy link';
+          copy.onclick = () => { navigator.clipboard.writeText(row.link);
+                                 toast('Signing link copied.'); };
+          wrap.append(copy);
+          const again = document.createElement('button');
+          again.className = 'ghost'; again.textContent = 'Send again';
+          again.onclick = () => { dlgDocs.close(); openSend(row.id); };
+          wrap.append(again);
+        }
+        const refresh = document.createElement('button');
+        refresh.className = 'ghost'; refresh.textContent = 'Refresh';
+        refresh.onclick = async () => {
+          try { await api('/api/contracts/' + row.id + '/refresh', {});
+                openDocs(opts.showUser); }
+          catch (e) { toast(e.message, 'err'); }
+        };
+        if (row.document_id) wrap.append(refresh);
+        if (row.state === 'completed') {
+          const dl = document.createElement('button');
+          dl.className = 'ghost'; dl.textContent = 'Signed PDF';
+          dl.onclick = () => window.open('/api/contracts/' + row.id
+                                       + '/signed.pdf', '_blank');
+          wrap.append(dl);
+        }
+        const trail = document.createElement('button');
+        trail.className = 'ghost'; trail.textContent = 'Trail';
+        trail.onclick = () => showTrail(row);
+        wrap.append(trail);
+        td.append(wrap);
+      } else {
+        td.textContent = v;
+      }
+      tr.append(td);
+    });
+    body.append(tr);
+  });
+  t.append(body); host.append(t);
+}
+
+function showTrail(row){
+  const lines = (row.trail || []).map(e =>
+    e.at + '  ·  ' + e.what + (e.who && e.who !== 'document'
+                               ? '  ·  ' + e.who : ''));
+  alert('Audit trail for ' + (row.project_name || 'this proposal') + '\n\n'
+      + (lines.length ? lines.join('\n')
+                      : 'Nothing recorded yet.')
+      + '\n\nThe signing service holds the full certificate, which is '
+      + 'attached to the signed PDF.');
+}
+
+async function openDocs(everyone){
+  const host = $('#docsBody');
+  host.innerHTML = '<p class="empty">Loading\u2026</p>';
+  dlgDocs.showModal();
+  try {
+    const j = await (await fetch('/api/contracts?mine=' + (everyone ? 0 : 1)))
+                    .json();
+    host.innerHTML = '';
+    const t = j.totals || {};
+    const cards = document.createElement('div');
+    cards.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,'
+      + 'minmax(150px,1fr));gap:10px;margin-bottom:16px';
+    [['Sent', t.count], ['Awaiting signature', t.awaiting],
+     ['Completed', t.completed], ['Value out', Math.round(t.value || 0)],
+     ['Value won', Math.round(t.won || 0)]].forEach(([k, v]) => {
+      const el = document.createElement('div');
+      el.style.cssText = 'background:#fff;border:1px solid var(--line);'
+        + 'border-radius:12px;padding:12px 14px';
+      el.innerHTML = '<div style="font-size:10.5px;letter-spacing:.09em;'
+        + 'color:var(--faint);text-transform:uppercase"></div>'
+        + '<div style="font-size:21px;margin-top:4px"></div>';
+      el.children[0].textContent = k;
+      el.children[1].textContent = (v || 0).toLocaleString();
+      cards.append(el);
+    });
+    host.append(cards);
+    contractsTable(host, j.contracts || [], {showUser: everyone});
+  } catch (e) {
+    host.innerHTML = '<div class="banner warn">' + e.message + '</div>';
+  }
+}
+$('#btnDocs').onclick = () => openDocs(false);
 
 window.addEventListener('resize', buildOverlay);
 document.addEventListener('keydown', e => {
@@ -2212,6 +2605,8 @@ const IDEAS = [
   'Make every card on page 4 shorter and sharper',
   'Add a page about security and compliance',
   'Price it in AED instead',
+  'Change the total to 20000 and spread the milestones',
+  'Set milestone 3 to 4000',
   'Reorder the integrations so payments comes first',
   'Delete the UI screens from the whole proposal',
   'Remove the marketing page',
@@ -2350,6 +2745,9 @@ $('#btnChat').onclick = async () => {
     else {
       chatHistory.push({role: 'assistant', text: r.note || 'changed'});
       chatSay('Assistant', r.note || (r.applied + ' change(s) made.'));
+      (r.money || []).forEach(line => chatSay('Money changed', line));
+      if (r.money && r.money.length && !r.milestones_ok)
+        chatSay('Check the figures', r.milestone_warning, 'err');
       commit(d => { Object.keys(d).forEach(k => delete d[k]);
                     Object.assign(d, r.data); },
              'assistant: ' + text.slice(0, 60));
@@ -2365,6 +2763,8 @@ fetch('/api/health').then(r=>r.json()).then(j=>{
   else if (!j.anthropic_key_set)
     toast('ANTHROPIC_API_KEY is not set on the server. Generate will fail.', 'err');
 }).catch(()=>{});
+
+$('#avatar').onclick = () => openSignature();
 
 function applyUser(){
   if (!user) return;

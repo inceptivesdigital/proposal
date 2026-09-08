@@ -375,6 +375,32 @@ def page15(c, d):
     signers = [(m.get("client_contact", ""), [m.get("client_company", "")]),
                (m.get("signer_name", ""),
                 [m.get("signer_role", ""), "Inceptives Digital"])]
+    # the sender's signature, applied in the studio before sending
+    sig = (d.get("_signature") or {})
+    if sig.get("path"):
+        try:
+            from PIL import Image as _Im
+            im = _Im.open(sig["path"])
+            box_w, box_h = 150.0, 44.0
+            fx, fy, fw, fh = fit_box(im.width, im.height, P15["cols"][1],
+                                     P15["name_y"] + 16, box_w, box_h,
+                                     anchor="left")
+            place_image(c, sig["path"], fx, fy, fw, fh)
+        except Exception:                                     # noqa: BLE001
+            pass
+    if sig.get("signed_at"):
+        c.setFillColorRGB(0.42, 0.46, 0.54)
+        c.setFont("G-Light", 8.4)
+        c.drawString(P15["cols"][1], P15["name_y"] + 62,
+                     "Signed %s" % sig["signed_at"])
+
+    # an invisible tag so the signing service can place the client's field
+    tag = d.get("_sign_tag")
+    if tag:
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("G-Light", 7.0)
+        c.drawString(P15["cols"][0], P15["name_y"] + 30, tag)
+
     for i, (x, (name, sub)) in enumerate(zip(P15["cols"], signers)):
         draw_lines(c, [name], x, P15["name_y"], 0, "G-Med", 11.5, INK)
         parts = [s for s in sub if s]

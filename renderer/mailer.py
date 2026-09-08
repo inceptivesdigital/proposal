@@ -54,9 +54,22 @@ def _non_ascii(label, raw):
     return out
 
 
+def contracts_from_ok():
+    """Is the contracts address one this server can actually send as?"""
+    if not CONTRACTS_FROM or not USER:
+        return True
+    return CONTRACTS_FROM.lower() == USER.lower() or \
+        CONTRACTS_FROM.rsplit("@", 1)[-1].lower() == USER.rsplit("@", 1)[-1].lower()
+
+
 def check():
     """What is configured, and whether anything looks wrong with it."""
     problems = []
+    if not contracts_from_ok():
+        problems.append(
+            "CONTRACTS_FROM (%s) is not on the same domain as SMTP_USER (%s). "
+            "Mail sent as that address will usually be treated as spam."
+            % (CONTRACTS_FROM, USER))
     for label, value in (("SMTP_HOST", HOST), ("SMTP_USER", USER),
                          ("SMTP_PASSWORD", PASSWORD)):
         if not value:
@@ -73,6 +86,7 @@ def check():
                         "is 16 with no spaces." % len(PASSWORD))
     return {"configured": configured(), "host": HOST, "port": PORT,
             "sender": SENDER, "sender_name": SENDER_NAME,
+            "contracts_from": CONTRACTS_FROM,
             "password_length": len(PASSWORD), "problems": problems}
 
 
@@ -132,3 +146,48 @@ def _deliver(msg, context):
             s.login(USER, PASSWORD)
             s.send_message(msg)
     return {"sent": True, "echoed": False}
+
+
+# ---------------------------------------------------------------------------
+# Contract emails
+# ---------------------------------------------------------------------------
+# Sent from the mailbox that is authenticated, but presented as the contracts
+# address, so a client sees the address you want them to reply to. Both are on
+# your own domain, so this does not break SPF or DKIM.
+
+# Defaults to the authenticated mailbox. Sending as an address the server does
+# not own fails SPF and lands in spam, which defeats the point.
+CONTRACTS_FROM = _clean(os.environ.get("CONTRACTS_FROM", "")) or USER or SENDER
+CONTRACTS_NAME = _clean(os.environ.get("CONTRACTS_FROM_NAME",
+                                       "Inceptives Digital"))
+
+
+def send_contract(to_email, to_name, subject, body_text, link):
+    """The signing invitation, from your own domain."""
+    if not configured():
+        raise RuntimeError(
+            "Email is not configured, so the invitation cannot be sent from "
+            "your own address. Set SMTP_HOST, SMTP_USER and SMTP_PASSWORD, or "
+            "send it through the signing service instead.")
+    msg = EmailMessage()
+    msg["Subject"] = _clean(subject)
+    msg["From"] = formataddr((CONTRACTS_NAME, CONTRACTS_FROM))
+    msg["To"] = formataddr((_clean(to_name), _clean(to_email)))
+    msg["Reply-To"] = CONTRACTS_FROM
+    msg["Message-ID"] = make_msgid(domain=CONTRACTS_FROM.rsplit("@", 1)[-1])
+    text = "%s\n\nSign here:\n%s\n" % (body_text, link)
+    msg.set_content(text, charset="utf-8")
+    msg.add_alternative(
+        "<div style=\"font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;"
+        "color:#12151c\">"
+        "<p>%s</p>"
+        "<p style=\"margin:22px 0\">"
+        "<a href=\"%s\" style=\"background:#4160aa;color:#fff;padding:12px 20px;"
+        "border-radius:9px;text-decoration:none;display:inline-block\">"
+        "Review and sign</a></p>"
+        "<p style=\"font-size:13px;color:#6b7280\">Or paste this into your "
+        "browser:<br>%s</p></div>"
+        % (_clean(body_text).replace("\n", "<br>"), link, link),
+        subtype="html")
+    context = ssl.create_default_context()
+    return _deliver(msg, context)

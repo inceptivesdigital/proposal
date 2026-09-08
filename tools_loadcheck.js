@@ -8,7 +8,10 @@ const make = id => new Proxy({id, style:{}, dataset:{},
   append(){}, prepend(){}, remove(){}, querySelector(){return make('x')},
   querySelectorAll(){return []}, files:[], addEventListener(){}, focus(){},
   select(){}, click(){}, scrollIntoView(){}, showModal(){}, close(){},
-  insertAdjacentHTML(){}, getBoundingClientRect(){return {left:0,top:0,width:800,height:1000}}},
+  insertAdjacentHTML(){}, getBoundingClientRect(){return {left:0,top:0,width:800,height:1000}},
+  getContext(){ return {lineWidth:0, lineCap:'', lineJoin:'', strokeStyle:'',
+    beginPath(){}, moveTo(){}, lineTo(){}, stroke(){}, clearRect(){}}; },
+  toDataURL(){ return 'data:image/png;base64,'; }, width:640, height:200},
   {get(t,k){return k in t ? t[k] : undefined}, set(t,k,v){t[k]=v;return true}});
 const missing = [];
 const doc = {

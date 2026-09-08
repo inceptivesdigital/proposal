@@ -74,6 +74,47 @@ Development** on each.
     SMTP_FROM              proposals@inceptivesdigital.com
     OTP_DEV_ECHO           0
 
+**For signatures**
+
+    SIGNWELL_API_KEY       from signwell.com, Settings then API
+    CONTRACTS_FROM_NAME    Inceptives Digital
+
+Real contracts are the default. Set `SIGNWELL_TEST_MODE=1` only while trying
+things out: test documents are watermarked and only reach your own domain.
+
+`CONTRACTS_FROM` defaults to whatever `SMTP_USER` is, which is
+hello@inceptivesdigital.com. Do not set it to an address the mail server cannot
+send as, such as contracts@, unless you first create that mailbox or alias in
+Google Workspace. Sending as an address you do not own fails SPF and lands in
+spam. `/api/health` warns if the two do not match.
+
+Point SignWell's webhook at `https://your-domain/api/webhooks/signwell` so
+signature status arrives without polling.
+
+## How signing works
+
+1. Each person sets up a signature once, by clicking their initials in the top
+   right. Drawn, typed, or a photograph of their real one.
+2. **Sign & send** on a proposal signs page 15 with that signature, their name,
+   role and the date.
+3. They then choose how the client receives it: through SignWell, from your own
+   mailbox, or both. Either can land in spam, so both is the answer when a
+   client has missed one before.
+4. The client signs at SignWell, which holds the certificate and the audit
+   trail. Status comes back by webhook.
+5. **Documents** shows each person their own; **Admin** shows everyone's.
+
+Because your people sign inside the studio, every document has one recipient,
+which is the cheapest shape on SignWell's free tier.
+
+## Checking it before you send a real one
+
+    python3 tools_systemcheck.py
+
+Runs the whole system with the model, the signing service and the mail server
+stubbed. 45 checks covering accounts, proposals, screens, signing, output,
+admin and the platform itself.
+
 **For UI screens**
 
     SCREENSHOT_PROVIDER    screenshotone

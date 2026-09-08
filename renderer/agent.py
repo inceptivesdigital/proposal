@@ -19,7 +19,11 @@ MODEL = os.environ.get("PROPOSAL_AGENT_MODEL",
 PAGE_KEYS = ["page1", "page2", "page3", "page4", "page9", "page10", "page11",
              "page12", "page13", "page14", "page15"]
 
-LOCKED = ("meta", "page12.total", "page14.cards")
+# Nothing is locked outright any more. Money and client details are guarded
+# instead: the assistant may only set a figure that appears in the instruction,
+# so it can carry out an intent but never invent a price.
+MONEY_PATHS = ("page12.total_value", "page12.total")
+GUARDED = ("meta.", "page12.", "page14.cards")
 
 SYSTEM = """You edit an Inceptives Digital proposal on behalf of a salesperson.
 
@@ -47,6 +51,16 @@ Operations:
  {"op":"rewrite","paths":["page4.cards.0.body","page4.cards.1.body"],
   "values":["...","..."]}                     change several fields at once,
                                               for a change of tone or length
+ {"op":"set","path":"page12.total_value","value":20000}
+                                              the total price
+ {"op":"set","path":"page12.rows.2.amount","value":4000}
+                                              one milestone amount
+ {"op":"rebalance"}                           spread the total across the paid
+                                              milestones so they add up, moving
+                                              the middle ones only
+ {"op":"set","path":"meta.client_company","value":"..."}
+                                              client details, the project name,
+                                              the signer
  {"op":"no_screens","value":true}             remove every UI mockup from the
                                               whole proposal (or false to keep)
  {"op":"clear_screen","page":"core_pages.0"}  remove the mockups from one page
@@ -126,8 +140,17 @@ logo, restyle the waves or change the brand colours.
 Describe what is in one before placing it, so the user knows you looked. Use
 place_image with its id when they ask for it to go on a page.
 
+MONEY. You may change the total and the milestone amounts, but only to a figure
+the user has actually written in their instruction. Never calculate a price of
+your own, never round one, and never invent one. If they ask for a change but
+give no number, say what you need instead of guessing.
+
+After changing any amount, add {"op":"rebalance"} unless the user has given
+every figure themselves. It spreads the total across the paid milestones so the
+page adds up, adjusting the middle ones and leaving the first and last alone.
+
 Rules:
-- Never touch prices, client details or the page 14 legal statements. If asked, \
+- Never invent prices, client details or the page 14 legal statements. If asked, \
 refuse in the note and make no operation for it.
 - A new page needs between two and six cards, a two-line headline, and an \
 eyebrow naming the section. Keep card bodies to one or two sentences.
@@ -248,9 +271,41 @@ def summarise(data):
     return out
 
 
+def is_money(path):
+    return path.endswith(".amount") or path in MONEY_PATHS \
+        or path.startswith("page12.total")
+
+
+def numbers_in(text):
+    """Every figure the user wrote, with separators removed."""
+    found = set()
+    for raw in re.findall(r"\d[\d,\.]*", text or ""):
+        cleaned = raw.replace(",", "")
+        try:
+            value = float(cleaned)
+        except ValueError:
+            continue
+        found.add(int(value) if value == int(value) else value)
+        # "20k" and "20" should both match a stated 20000
+        if value < 1000:
+            found.add(int(value * 1000))
+    for raw in re.findall(r"(\d+(?:\.\d+)?)\s*[kK]\b", text or ""):
+        found.add(int(float(raw) * 1000))
+    return found
+
+
+def money_allowed(value, instruction):
+    """A figure may be set only if the user wrote it."""
+    try:
+        number = int(float(str(value).replace(",", "").replace("$", "")))
+    except (TypeError, ValueError):
+        return False
+    return number in numbers_in(instruction)
+
+
 def is_locked(path):
-    return any(path == p or path.startswith(p + ".") for p in LOCKED) \
-        or path.endswith(".amount")
+    """Kept for callers that still ask. Nothing is refused outright now."""
+    return False
 
 
 def pages_mentioned(data, instruction, context=None):
@@ -319,11 +374,13 @@ def chat(data, instruction, client=None, context=None, history=None,
     out = _call_with_images(_client(client), SYSTEM, payload, images or [],
                             6000, MODEL)
     ops = [o for o in (out.get("ops") or []) if isinstance(o, dict)]
-    kept, refused = [], []
+    kept, refused, invented = [], [], []
     for o in ops:
         path = o.get("path", "")
-        if path and is_locked(path):
-            refused.append(path)
+        # a figure the user did not write is never applied
+        if path and is_money(path) and not money_allowed(o.get("value"),
+                                                         instruction):
+            invented.append("%s = %s" % (path, o.get("value")))
             continue
         if o.get("op") == "rewrite":
             bad = [p for p in o.get("paths", []) if is_locked(p)]
@@ -339,6 +396,10 @@ def chat(data, instruction, client=None, context=None, history=None,
         kept.append(o)
     note = out.get("note", "")
     answer = out.get("answer", "")
+    if invented:
+        note += (" I did not change %s, because that figure was not in your "
+                 "instruction. Tell me the number and I will set it."
+                 % ", ".join(invented))
     if refused:
         note += (" Left alone: %s, which are typed or contractual."
                  % ", ".join(sorted(set(refused))))
@@ -362,6 +423,13 @@ def _page_number(key):
 def apply_ops(data, ops):
     """Apply agent operations to a document. Returns the number applied."""
     applied = 0
+    # amounts set explicitly in this batch are not moved by a later rebalance
+    pinned = set()
+    for o in ops:
+        path = o.get("path", "")
+        if o.get("op") == "set" and re.match(r"page12\.rows\.(\d+)\.amount$",
+                                             path or ""):
+            pinned.add(int(path.split(".")[2]))
     for o in ops:
         kind = o.get("op")
         try:
@@ -399,6 +467,8 @@ def apply_ops(data, ops):
                         _mutate(data, {"op": "set", "path": path, "value": value})
                     except Exception:                         # noqa: BLE001
                         continue
+            elif kind == "rebalance":
+                _rebalance(data, pinned)
             elif kind == "clean_area":
                 region = o.get("region") or {}
                 if region.get("w") and region.get("h"):
@@ -443,6 +513,33 @@ def apply_ops(data, ops):
         except Exception:                                     # noqa: BLE001
             continue
     return applied
+
+
+def _rebalance(data, pinned=()):
+    """Make the milestones add up to the total, moving the middle ones only.
+
+    The first and last carry the most meaning in a payment schedule, so they
+    are left alone, and so is any amount the user has just set by hand.
+    """
+    page = data.get("page12") or {}
+    rows = page.get("rows") or []
+    total = page.get("total_value")
+    paid = [i for i, r in enumerate(rows)
+            if isinstance(r.get("amount"), (int, float))]
+    if total is None or len(paid) < 3:
+        return
+    held = set(pinned) | {paid[0], paid[-1]}
+    movable = [i for i in paid if i not in held]
+    if not movable:
+        return
+    fixed = sum(int(rows[i]["amount"]) for i in paid if i in held)
+    room = int(total) - fixed
+    if room <= 0:
+        return
+    each = room // len(movable)
+    for i in movable:
+        rows[i]["amount"] = each
+    rows[movable[-1]]["amount"] = room - each * (len(movable) - 1)
 
 
 def _resolve(data, path):

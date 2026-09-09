@@ -162,32 +162,98 @@ CONTRACTS_NAME = _clean(os.environ.get("CONTRACTS_FROM_NAME",
                                        "Inceptives Digital"))
 
 
-def send_contract(to_email, to_name, subject, body_text, link):
-    """The signing invitation, from your own domain."""
+def send_contract(to_email, to_name, subject, body_text, link,
+                  project="", total="", signer=""):
+    """The signing invitation, from your own domain.
+
+    Plain text and HTML, because some clients read one and some the other, and
+    a link that only exists in an HTML button is a link half your recipients
+    cannot use.
+    """
     if not configured():
         raise RuntimeError(
             "Email is not configured, so the invitation cannot be sent from "
             "your own address. Set SMTP_HOST, SMTP_USER and SMTP_PASSWORD, or "
             "send it through the signing service instead.")
+    if not link:
+        raise RuntimeError("There is no signing link to send yet.")
+
     msg = EmailMessage()
     msg["Subject"] = _clean(subject)
     msg["From"] = formataddr((CONTRACTS_NAME, CONTRACTS_FROM))
     msg["To"] = formataddr((_clean(to_name), _clean(to_email)))
     msg["Reply-To"] = CONTRACTS_FROM
     msg["Message-ID"] = make_msgid(domain=CONTRACTS_FROM.rsplit("@", 1)[-1])
-    text = "%s\n\nSign here:\n%s\n" % (body_text, link)
-    msg.set_content(text, charset="utf-8")
-    msg.add_alternative(
-        "<div style=\"font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;"
-        "color:#12151c\">"
-        "<p>%s</p>"
-        "<p style=\"margin:22px 0\">"
-        "<a href=\"%s\" style=\"background:#4160aa;color:#fff;padding:12px 20px;"
-        "border-radius:9px;text-decoration:none;display:inline-block\">"
-        "Review and sign</a></p>"
-        "<p style=\"font-size:13px;color:#6b7280\">Or paste this into your "
-        "browser:<br>%s</p></div>"
-        % (_clean(body_text).replace("\n", "<br>"), link, link),
-        subtype="html")
-    context = ssl.create_default_context()
-    return _deliver(msg, context)
+
+    msg.set_content(
+        "%s\n\nReview and sign here:\n%s\n\n%s\n%s\n"
+        % (body_text, link,
+           ("Project: %s" % project) if project else "",
+           ("Total: %s" % total) if total else ""),
+        charset="utf-8")
+
+    rows = ""
+    if project:
+        rows += _row("Project", project)
+    if total:
+        rows += _row("Total", total)
+    if signer:
+        rows += _row("Already signed by", signer)
+
+    msg.add_alternative(_HTML % {
+        "body": _escape(body_text).replace("\n", "<br>"),
+        "link": link,
+        "rows": rows,
+        "from": CONTRACTS_FROM,
+        "name": CONTRACTS_NAME,
+    }, subtype="html")
+    return _deliver(msg, ssl.create_default_context())
+
+
+def _escape(text):
+    return (str(text or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def _row(label, value):
+    return ('<tr><td style="padding:7px 0;color:#6b7280;font-size:13px;'
+            'width:150px">%s</td><td style="padding:7px 0;font-size:13px;'
+            'color:#12151c">%s</td></tr>' % (_escape(label), _escape(value)))
+
+
+_HTML = """\
+<!doctype html><html><body style="margin:0;background:#f4f6fa;padding:26px 12px">
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0">
+<tr><td align="center">
+<table role="presentation" width="100%%" style="max-width:560px;background:#fff;
+  border:1px solid #e7ebf2;border-radius:16px;overflow:hidden">
+  <tr><td style="padding:26px 30px 6px">
+    <div style="font:600 15px/1.3 -apple-system,'Segoe UI',Roboto,sans-serif;
+      color:#4160aa">Inceptives Digital</div>
+  </td></tr>
+  <tr><td style="padding:8px 30px 0;font:15px/1.6 -apple-system,'Segoe UI',
+    Roboto,sans-serif;color:#12151c">%(body)s</td></tr>
+  <tr><td style="padding:24px 30px 4px">
+    <a href="%(link)s" style="display:inline-block;background:#4160aa;
+      color:#ffffff;font:600 15px/1 -apple-system,'Segoe UI',Roboto,sans-serif;
+      padding:15px 26px;border-radius:10px;text-decoration:none">
+      Review and sign</a>
+  </td></tr>
+  <tr><td style="padding:6px 30px 0;font:13px/1.5 -apple-system,'Segoe UI',
+    Roboto,sans-serif;color:#6b7280">
+    Or paste this into your browser:<br>
+    <a href="%(link)s" style="color:#4160aa;word-break:break-all">%(link)s</a>
+  </td></tr>
+  <tr><td style="padding:18px 30px 0">
+    <table role="presentation" width="100%%" style="border-top:1px solid #e7ebf2;
+      font-family:-apple-system,'Segoe UI',Roboto,sans-serif">%(rows)s</table>
+  </td></tr>
+  <tr><td style="padding:20px 30px 28px;font:12.5px/1.5 -apple-system,
+    'Segoe UI',Roboto,sans-serif;color:#9aa3b2">
+    Signed securely through SignWell. If anything needs changing before you
+    sign, reply to this email and we will sort it out.<br>
+    <span style="color:#c3cad6">%(name)s &middot; %(from)s</span>
+  </td></tr>
+</table>
+</td></tr></table></body></html>
+"""

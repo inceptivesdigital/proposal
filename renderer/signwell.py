@@ -50,14 +50,31 @@ def _call(method, path, payload=None):
         raise RuntimeError("%s could not be reached: %s" % (NAME, exc.reason))
 
 
-def send(pdf_bytes, filename, client_name, client_email, subject, message,
-         send_email=True, sender_name="", reply_to=""):
-    """Create the document and, unless told otherwise, have SignWell email it.
+# Where the client signs on the last page, in points from the top left, which
+# is how SignWell places fields. Taken from the page 15 layout.
+PAGE_HEIGHT = 841.92
+CLIENT_FIELD = {"x": 99.0, "width": 168.0, "height": 40.0, "from_bottom": 104.0}
 
-    Returns the document id and the client's signing link.
+
+def send(pdf_bytes, filename, client_name, client_email, subject, message,
+         send_email=True, sender_name="", reply_to="", pages=15):
+    """Create the document and return its id and the client's signing link.
+
+    Embedded signing is on so that a real signing URL comes back, which is what
+    we send when the invitation goes from our own mailbox. Notifications are a
+    separate switch, because turning embedded signing on otherwise stops
+    SignWell emailing anyone at all.
     """
     if not configured():
         raise RuntimeError("SIGNWELL_API_KEY is not set on the server.")
+    top = PAGE_HEIGHT - CLIENT_FIELD["from_bottom"] - CLIENT_FIELD["height"]
+    field = {"api_id": "client_signature", "type": "signature",
+             "required": True, "recipient_id": "1", "page": int(pages),
+             "x": CLIENT_FIELD["x"], "y": top,
+             "width": CLIENT_FIELD["width"], "height": CLIENT_FIELD["height"]}
+    dated = dict(field, api_id="client_date", type="date", required=False,
+                 x=CLIENT_FIELD["x"] + CLIENT_FIELD["width"] + 12,
+                 width=110.0, height=26.0)
     payload = {
         "test_mode": TEST_MODE,
         "name": filename,
@@ -65,33 +82,49 @@ def send(pdf_bytes, filename, client_name, client_email, subject, message,
         "message": message,
         "files": [{"name": filename,
                    "file_base64": base64.b64encode(pdf_bytes).decode()}],
-        "recipients": [{"id": "1", "name": client_name, "email": client_email,
-                        "send_email": bool(send_email)}],
-        "fields": [[
-            {"api_id": "client_signature", "type": "signature", "required": True,
-             "recipient_id": "1", "page": 0, "x": 0, "y": 0},
-        ]],
+        "recipients": [{"id": "1", "name": client_name, "email": client_email}],
+        "fields": [[field, dated]],
         "embedded_signing": True,
+        "embedded_signing_notifications": bool(send_email),
         "draft": False,
         "apply_signing_order": False,
         "reminders": True,
+        "allow_decline": True,
     }
     if reply_to:
-        payload["reply_to"] = reply_to
+        payload["custom_requester_email"] = reply_to
     if sender_name:
-        payload["sender_name"] = sender_name
-    out = _call("POST", "/documents/", payload)
-    return _summarise(out)
+        payload["custom_requester_name"] = sender_name
+    return _summarise(_call("POST", "/documents/", payload))
+
+
+SIGNING_KEYS = ("embedded_signing_url", "signing_url", "sign_url", "url")
 
 
 def _summarise(out):
-    """The few things the rest of the system cares about."""
-    recipients = out.get("recipients") or []
+    """The few things the rest of the system cares about.
+
+    A document also has a page of its own on signwell.com, but that is not a
+    signing link: sent to a client it shows them nothing they can act on, which
+    is exactly what went wrong the first time.
+    """
     link = ""
-    for r in recipients:
-        link = r.get("embedded_signing_url") or r.get("signing_url") or link
+    for r in out.get("recipients") or []:
+        for key in SIGNING_KEYS:
+            value = r.get(key)
+            if value and "/docs/" not in str(value):
+                link = value
+                break
+        if link:
+            break
     return {"id": out.get("id"), "status": out.get("status", "sent"),
-            "link": link, "name": out.get("name", ""), "raw_status": out}
+            "link": link, "name": out.get("name", ""),
+            "recipients": out.get("recipients") or [], "raw_status": out}
+
+
+def signing_link(document_id):
+    """Fetch the signing URL again, for a resend."""
+    return _summarise(_call("GET", "/documents/%s/" % document_id))["link"]
 
 
 def status(document_id):

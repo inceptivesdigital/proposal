@@ -87,6 +87,18 @@ Operations:
  {"op":"place_image","page":"page4","image":"<image id the user uploaded>"}
                                               put an uploaded image into that
                                               page's device slot
+ {"op":"sign"}                                sign the proposal with the
+                                              signer's stored signature
+ {"op":"send","via":"signer"}                 send it to the client. via is
+                                              "signer" for the signing service,
+                                              "our_email" for your own mailbox,
+                                              or "both"
+ {"op":"set","path":"meta.client_email","value":"..."}
+                                              the client's email, needed before
+                                              anything can be sent
+ {"op":"headline","page":"page4","value":["line one","line two"]}
+                                              rewrite a page's headline
+ {"op":"eyebrow","page":"page5","value":"..."} the small line above a headline
  {"op":"spacing","page":"page10","value":1.2}  open up or tighten the spacing on
                                               a page (1.0 is the design default,
                                               1.3 is airier, 0.85 is tighter)
@@ -467,6 +479,23 @@ def apply_ops(data, ops):
                         _mutate(data, {"op": "set", "path": path, "value": value})
                     except Exception:                         # noqa: BLE001
                         continue
+            elif kind == "headline":
+                page = data.get(o.get("page", ""))
+                value = o.get("value")
+                if isinstance(page, dict) and value:
+                    page["headline"] = value if isinstance(value, list) \
+                        else [value]
+            elif kind == "eyebrow":
+                key = o.get("page", "")
+                node = data.get(key)
+                if node is None and key.startswith("core_pages."):
+                    pages = data.get("core_pages") or []
+                    idx = int(key.split(".")[1])
+                    node = pages[idx] if idx < len(pages) else None
+                if isinstance(node, dict) and o.get("value"):
+                    node["eyebrow"] = o["value"]
+            elif kind in ("sign", "send"):
+                data.setdefault("_actions", []).append(o)
             elif kind == "rebalance":
                 _rebalance(data, pinned)
             elif kind == "clean_area":

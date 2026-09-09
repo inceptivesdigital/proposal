@@ -66,9 +66,10 @@ def main():
 
     mails = []
     SW.configured = lambda: True
-    SW.send = lambda pdf, fn, n, e, s, m, send_email=True, sender_name="", \
-        reply_to="": {"id": "doc_1", "status": "sent",
-                      "link": "https://www.signwell.com/s/x", "name": fn}
+    SW.send = lambda pdf, fn, n, e, s, m, **kw: {
+        "id": "doc_1", "status": "sent",
+        "link": "https://www.signwell.com/sign/x", "name": fn}
+    SW.signing_link = lambda d: "https://www.signwell.com/sign/x"
     SW.status = lambda d: {"id": d, "status": "completed", "link": ""}
     SW.audit_trail = lambda d: [
         {"who": "chris@example.com", "what": "sent", "at": "2026-09-01 10:00"},
@@ -179,12 +180,14 @@ def main():
     check("sign in the studio", r.status_code == 200)
     cid = r.json()["contract_id"]
     MAIL.configured = lambda: True
-    MAIL.send_contract = lambda to, name, subj, body, link: (
+    MAIL.send_contract = lambda to, name, subj, body, link, **kw: (
         mails.append("our email"), {"sent": True})[1]
     r = c.post("/api/contracts/send", json={"contract_id": cid, "via": "both"})
+    body = r.json()
     check("send by both routes",
-          r.status_code == 200 and "our email" in mails)
-    check("signing link", bool(r.json()["link"]))
+          r.status_code == 200 and "our email" in mails,
+          "; ".join(body.get("problems", []))[:50])
+    check("signing link", bool(body.get("link")), body.get("link", ""))
     c.post("/api/contracts/%s/refresh" % cid)
     row = c.get("/api/contracts/%s" % cid).json()["contract"]
     check("client signs", row["state"] == "completed")
@@ -201,6 +204,18 @@ def main():
     mine = c.get("/api/contracts?mine=1").json()
     check("my documents table", mine["totals"]["completed"] == 1)
 
+    print("\nassistant actions")
+    AG._client = lambda c=None: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **k: Msg(json.dumps(
+            {"ops": [{"op": "sign"}, {"op": "send", "via": "signer"}],
+             "note": "Signed and sent.", "answer": ""}))))
+    data2 = json.loads(json.dumps(data))
+    r = c.post("/api/chat", json={"data": data2, "proposal_id": pid,
+                                  "instruction": "sign this and send it"})
+    acts = r.json().get("actions", [])
+    check("assistant signs and sends", len(acts) == 2,
+          " | ".join(a[:34] for a in acts))
+
     print("\noutput")
     r = c.post("/api/render", json={"data": data, "proposal_id": pid})
     check("render the pdf", r.status_code == 200 and len(r.json()["pdf"]) > 1000)
@@ -213,7 +228,8 @@ def main():
     j = adm.json()
     check("no broken panels",
           not [k for k, v in j.items() if isinstance(v, dict) and v.get("error")])
-    check("contracts in admin", len(j.get("contracts", [])) == 1)
+    check("contracts in admin", len(j.get("contracts", [])) >= 1,
+          "%d row(s)" % len(j.get("contracts", [])))
     check("costs recorded", (j.get("totals") or {}).get("calls", 0) > 0,
           "$%.4f" % (j.get("totals", {}).get("cost") or 0))
     check("activity recorded", len(j.get("activity", [])) > 3)

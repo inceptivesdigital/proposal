@@ -260,7 +260,7 @@ class EditIn(BaseModel):
 
 
 # ------------------------------------------------------------------- routes
-BUILD = "2026-08-30.4-production"
+BUILD = "2026-08-30.6-assistant-signs"
 PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() in ("production", "prod")
 
 
@@ -638,7 +638,7 @@ def api_contract_send(body: SendIn, session: str = Cookie(None)):
     data["_signature"] = {"path": sig_path,
                           "signed_at": row["signed_by_user_at"]}
     data["_sign_tag"] = "[sig:client]  [date:client]"
-    pdf, _meta = render_pdf(data, screens_for(row["proposal_id"]))
+    pdf, pdf_meta = render_pdf(data, screens_for(row["proposal_id"]))
 
     subject = body.subject or ("%s from Inceptives Digital"
                                % (row["project_name"] or "Your proposal"))
@@ -653,7 +653,8 @@ def api_contract_send(body: SendIn, session: str = Cookie(None)):
                               subject, message,
                               send_email=via in ("signer", "both"),
                               sender_name="Inceptives Digital",
-                              reply_to=MAIL.CONTRACTS_FROM)
+                              reply_to=MAIL.CONTRACTS_FROM,
+                              pages=pdf_meta.get("pages", 15))
         except Exception as exc:                              # noqa: BLE001
             raise HTTPException(400, str(exc))
         CONTRACTS.update(body.contract_id, provider=SIGNER.NAME,
@@ -666,14 +667,32 @@ def api_contract_send(body: SendIn, session: str = Cookie(None)):
             raise HTTPException(400, str(exc))
 
     problems = []
-    if via in ("our_email", "both"):
+    if via in ("our_email", "both") and not row["link"]:
+        # a resend can find the link empty if the first attempt only half worked
         try:
-            MAIL.send_contract(row["client_email"], row["client_name"],
-                               subject, message, row["link"])
-            CONTRACTS.add_event(body.contract_id, row["client_email"],
-                                "emailed from %s" % MAIL.CONTRACTS_FROM)
-        except Exception as exc:                              # noqa: BLE001
-            problems.append(str(exc)[:200])
+            found = SIGNER.signing_link(row["document_id"])
+            if found:
+                CONTRACTS.update(body.contract_id, link=found)
+                row = CONTRACTS.get(body.contract_id)
+        except Exception:                                     # noqa: BLE001
+            pass
+    if via in ("our_email", "both"):
+        if not row["link"]:
+            problems.append("There is no signing link yet, so nothing was sent "
+                            "from your mailbox. Send through the service "
+                            "instead, or try again in a moment.")
+        else:
+            try:
+                from renderer.model import money as _money
+                MAIL.send_contract(
+                    row["client_email"], row["client_name"], subject, message,
+                    row["link"], project=row["project_name"] or "",
+                    total=_money(row["total"], row["currency"] or "USD"),
+                    signer=row["user_name"] or "")
+                CONTRACTS.add_event(body.contract_id, row["client_email"],
+                                    "emailed from %s" % MAIL.CONTRACTS_FROM)
+            except Exception as exc:                          # noqa: BLE001
+                problems.append(str(exc)[:200])
     if via in ("signer", "both"):
         CONTRACTS.add_event(body.contract_id, row["client_email"],
                             "emailed by %s" % SIGNER.NAME)
@@ -1758,6 +1777,8 @@ def api_chat(body: ChatIn, session: str = Cookie(None)):
                 _at(body.data, path), _at(data, path), body.instruction)
             if r.get("is_rule"):
                 rule = r
+    actions = data.pop("_actions", [])
+    performed = _do_actions(actions, data, body, session)
     money = _money_changes(body.data, data)
     if user:
         DB.note_activity(user["id"], user["email"], "asked the assistant",
@@ -1771,7 +1792,40 @@ def api_chat(body: ChatIn, session: str = Cookie(None)):
     return {"data": data, "applied": applied, "note": out["note"],
             "answer": out.get("answer", ""), "ops": out["ops"],
             "learned": learned, "rule": rule, "money": money,
+            "actions": performed,
             "milestones_ok": ok, "milestone_warning": warning}
+
+
+def _do_actions(actions, data, body, session):
+    """Signing and sending, asked for in words."""
+    done = []
+    if not actions or not body.proposal_id:
+        return done
+    for act in actions:
+        try:
+            if act.get("op") == "sign":
+                out = api_contract_sign(SignIn(proposal_id=body.proposal_id,
+                                               data=data), session)
+                data["_contract_id"] = out["contract_id"]
+                done.append("Signed with your stored signature.")
+            elif act.get("op") == "send":
+                cid = data.get("_contract_id")
+                if not cid:
+                    rows = CONTRACTS.for_proposal(body.proposal_id)
+                    cid = rows[0]["id"] if rows else None
+                if not cid:
+                    done.append("Nothing was sent: sign it first.")
+                    continue
+                sent = api_contract_send(SendIn(contract_id=cid,
+                                                via=act.get("via", "signer")),
+                                         session)
+                done.append("Sent to %s."
+                            % sent["contract"]["client_email"])
+        except HTTPException as exc:
+            done.append("Could not %s: %s" % (act.get("op"), exc.detail))
+        except Exception as exc:                              # noqa: BLE001
+            done.append("Could not %s: %s" % (act.get("op"), str(exc)[:140]))
+    return done
 
 
 def _money_changes(before, after):

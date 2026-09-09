@@ -307,7 +307,6 @@
             <span class="val" id="zoomVal">72%</span><button id="zoomIn">+</button></div>
           <span class="hint">Make the page bigger or smaller</span>
         </div>
-        <div class="btnwrap"><button id="btnRewrite">✦ Rewrite selection</button><span class="hint">Let AI reword what you selected</span></div>
         <div class="btnwrap"><button id="btnComment">Comment</button>
           <span class="hint">Mark a spot and tell the assistant</span></div>
         <div class="btnwrap"><button id="btnQA">Run QA &amp; fix</button>
@@ -514,6 +513,22 @@
   <button onclick="dlgSignature.close()">Cancel</button>
   <button class="ghost" id="btnSigRemove" style="color:var(--red)">Remove</button>
   <button class="primary" id="btnSigSave">Save signature</button>
+</footer></dialog>
+
+<dialog id="dlgClient" style="width:min(520px,94vw)">
+  <h3>Who is this going to?</h3><div class="in">
+  <p class="lab">The client signs by email, so this has to be right. It is
+    saved with the proposal and used on the cover and the signature page.</p>
+  <div class="field"><p class="lab">Their name</p>
+    <input id="cName" placeholder="Chris Deross"></div>
+  <div class="field"><p class="lab">Their company</p>
+    <input id="cCompany" placeholder="VFW Post 7420"></div>
+  <div class="field"><p class="lab">Their email</p>
+    <input id="cEmail" type="email" placeholder="chris@example.com"></div>
+  <div id="clientMsg"></div>
+</div><footer>
+  <button onclick="dlgClient.close()">Cancel</button>
+  <button class="primary" id="btnClientSave">Save and continue</button>
 </footer></dialog>
 
 <dialog id="dlgSend" style="width:min(620px,94vw)">
@@ -1211,8 +1226,6 @@ function openRewrite(){
   $('#rwPath').textContent = ((specFor(sel)||{}).label || sel) + ' \u00b7 ' + sel;
   $('#rwText').value = ''; dlgRewrite.showModal();
 }
-$('#btnRewrite').onclick = () => sel ? openRewrite()
-  : toast('Click a field on the page first.', 'err');
 $('#btnRunRewrite').onclick = async () => {
   try {
     const r = await api('/api/edit', {data: data(), path: sel,
@@ -2134,14 +2147,41 @@ $('#btnSigRemove').onclick = async () => {
 // --------------------------------------------------------------- contracts
 let currentContract = null;
 
+let afterClientDetails = null;
+
+function askClient(then){
+  const m = data().meta || {};
+  $('#cName').value = m.client_contact || '';
+  $('#cCompany').value = m.client_company || '';
+  $('#cEmail').value = m.client_email || '';
+  $('#clientMsg').innerHTML = '';
+  afterClientDetails = then;
+  dlgClient.showModal();
+  $('#cEmail').focus();
+}
+$('#btnClientSave').onclick = () => {
+  const email = ($('#cEmail').value || '').trim();
+  const ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  if (!ok) {
+    $('#clientMsg').innerHTML =
+      '<div class="banner warn">That does not look like an email address.</div>';
+    return $('#cEmail').focus();
+  }
+  commit(d => {
+    d.meta.client_contact = ($('#cName').value || '').trim() || d.meta.client_contact;
+    d.meta.client_company = ($('#cCompany').value || '').trim() || d.meta.client_company;
+    d.meta.client_email = email;
+  }, 'client details');
+  dlgClient.close();
+  const then = afterClientDetails; afterClientDetails = null;
+  if (then) then();
+};
+$('#cEmail').onkeydown = e => { if (e.key === 'Enter') $('#btnClientSave').click(); };
+
 $('#btnSign').onclick = async () => {
   if (!pid) return toast('Save this proposal first.', 'err');
-  const email = (data().meta || {}).client_email;
-  if (!email) {
-    const given = prompt('The client\u2019s email address, so they can sign:');
-    if (!given) return;
-    commit(d => { d.meta.client_email = given.trim(); }, 'client email');
-  }
+  if (!(data().meta || {}).client_email)
+    return askClient(() => $('#btnSign').click());
   try {
     const r = await api('/api/contracts/sign', {proposal_id: pid, data: data()});
     currentContract = r.contract_id;
@@ -2607,6 +2647,8 @@ const IDEAS = [
   'Price it in AED instead',
   'Change the total to 20000 and spread the milestones',
   'Set milestone 3 to 4000',
+  'Sign this and send it to the client',
+  'Rewrite the headline on page 4',
   'Reorder the integrations so payments comes first',
   'Delete the UI screens from the whole proposal',
   'Remove the marketing page',
@@ -2737,6 +2779,7 @@ $('#btnChat').onclick = async () => {
     else if (r.learned && r.learned.is_preference)
       chatSay('Assistant', 'Noted. You have asked for this on '
             + r.learned.seen + ' proposals, so I will offer it next time.');
+    (r.actions || []).forEach(line => chatSay('Done', line));
     if (r.answer && !r.applied) {
       chatSay('Assistant', r.answer);
       chatHistory.push({role: 'assistant', text: r.answer});
@@ -2746,6 +2789,7 @@ $('#btnChat').onclick = async () => {
       chatHistory.push({role: 'assistant', text: r.note || 'changed'});
       chatSay('Assistant', r.note || (r.applied + ' change(s) made.'));
       (r.money || []).forEach(line => chatSay('Money changed', line));
+      (r.actions || []).forEach(line => chatSay('Done', line));
       if (r.money && r.money.length && !r.milestones_ok)
         chatSay('Check the figures', r.milestone_warning, 'err');
       commit(d => { Object.keys(d).forEach(k => delete d[k]);
